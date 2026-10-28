@@ -3,6 +3,60 @@
 把一段短视频变成游戏可用的序列帧：抽帧 → AI 抠图 → 轻度时序平滑 →
 按透明区域裁剪 → 合成 Sprite Sheet，并输出 Unity 友好的索引 JSON。
 
+## Web 界面（推荐，跨平台、一键部署）
+
+Web 界面和命令行用的是同一套处理流程（抽帧、BiRefNet 抠图、时序平滑、
+合图），只是多了一个浏览器操作界面：拖入视频、调参数、看进度、
+预览合图和逐帧动画、一键导出。适合本机或局域网使用；**v1 没有登录
+鉴权，不要直接把 8000 端口暴露到公网**。
+
+### 一键部署（Docker）
+
+```bash
+docker compose up -d
+# 然后打开 http://localhost:8000
+```
+
+停止：`docker compose down`。任务上传和输出保存在项目下的 `jobs/` 目录。
+
+### 本地运行（不使用 Docker）
+
+```bash
+pip install -r requirements.txt
+spriteforge-web
+# 或：python -m spriteforge.web_app --host 127.0.0.1 --port 8000
+# 然后打开 http://127.0.0.1:8000
+```
+
+GPU 机器上本地运行时，按安装一节把 `onnxruntime` 换成与 CUDA/驱动
+匹配的 `onnxruntime-gpu`，速度会快很多；Docker 镜像默认是 CPU 版。
+
+### Web 界面功能
+
+- 导入：拖放或文件选择上传视频，上传后可直接预览原视频；单个文件上限 200MB
+- 参数：fps（默认 12）、列数（默认 6）、间距（默认 4）、模型（默认 birefnet-general）、
+  输入上限（默认 720px）、单帧目标尺寸（可选）、时序平滑开关（默认开）
+- 进度：轮询任务状态（queued / processing / completed / failed），失败原因直接显示在页面上
+  （如缺少 ffmpeg、模型首次下载失败等），而不是只打在控制台
+- 预览：Sprite Sheet 大图、按 fps 播放的逐帧动画（播放/暂停/拖动进度条）、逐帧缩略图网格
+- 导出：下载 sprite.png、index.json，或下载 ZIP（合图 + 索引 + 全部单帧）
+
+### Web API（供脚本调用）
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/` | Web 界面 |
+| GET | `/api/health` | 健康检查 |
+| POST | `/api/jobs` | multipart 上传视频 + 表单参数（fps、columns、spacing、model、max_size、target_size、temporal_smoothing），返回 `{"id": ...}`（202） |
+| GET | `/api/jobs/{id}` | 任务状态、进度、错误、帧列表 |
+| GET | `/api/jobs/{id}/sprite.png` | 合图下载 |
+| GET | `/api/jobs/{id}/index.json` | Unity 索引下载 |
+| GET | `/api/jobs/{id}/frames/{name}` | 单帧 PNG 下载 |
+| GET | `/api/jobs/{id}/export.zip` | ZIP 导出（合图 + 索引 + 单帧） |
+
+任务状态只保存在内存里，服务重启后旧任务记录会丢失（磁盘上的 `jobs/` 文件仍在，
+但需要重新提交任务）。可通过环境变量 `SPRITEFORGE_JOBS_DIR` 修改任务存储目录。
+
 ## 功能
 
 - 输入短视频（典型：1–3 秒，720×720 及以下分辨率）
@@ -127,6 +181,6 @@ TextureImporter 的 sprite rect，`pivot` 默认为中心（0.5, 0.5）。
 - 这是逐帧图片抠图 + 轻度 alpha 平滑，不是真正的视频抠图模型
   （如 RVM / VRMBG）。快速运动、半透明材质仍可能有轻微闪烁，
   关键帧建议人工检查。
-- 任务状态不持久化，纯命令行工具，无 Web 界面、无 FastAPI（v1 有意保持小而简单）。
+- Web 任务状态不持久化（见 Web 界面一节）；v1 有意保持小而简单，无 Redis、无登录鉴权。
 - 输入视频过长、帧数过多时，内存占用会随帧数增长；v1 面向 1–3 秒短视频。
 - 首次运行下载模型需要网络；模型缓存位置由 rembg/onnxruntime 决定。

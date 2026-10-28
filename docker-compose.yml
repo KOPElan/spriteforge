@@ -1,0 +1,14 @@
+services:
+  web:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - SPRITEFORGE_JOBS_DIR=/app/jobs
+    volumes:
+      # Job uploads/outputs survive container restarts. The model cache
+      # is intentionally not mounted by default; add a volume for
+      # ~/.cache or the rembg model dir if you want to keep it.
+      - ./jobs:/app/jobs
+    # Local/LAN use only: this service has no auth. Do not publish
+    # port 8000 to the public internet without a reverse proxy + auth.

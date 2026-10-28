@@ -1,0 +1,30 @@
+* { box-sizing: border-box; }
+body { margin: 0; font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; background: #111418; color: #e8ecf1; }
+header { padding: 24px 20px 8px; max-width: 960px; margin: 0 auto; }
+header h1 { margin: 0; }
+header p { color: #aab4c0; }
+main { max-width: 960px; margin: 0 auto; padding: 12px 20px 40px; display: grid; gap: 16px; }
+.card { background: #1c2128; border: 1px solid #2d3540; border-radius: 12px; padding: 18px; }
+.card h2 { margin-top: 0; font-size: 18px; }
+.card h3 { font-size: 15px; margin-bottom: 8px; }
+.hint { color: #aab4c0; font-size: 13px; }
+#dropzone { border: 2px dashed #3d4654; border-radius: 10px; padding: 28px 16px; text-align: center; cursor: pointer; }
+#dropzone.drag { border-color: #6ea8fe; background: #22303f; }
+#source-preview { width: 100%; max-height: 360px; margin-top: 12px; background: #000; }
+form { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+form label { display: grid; gap: 6px; font-size: 14px; }
+form label.checkbox { grid-template-columns: auto 1fr; align-items: center; }
+input, select, button { font-size: 15px; padding: 9px 10px; border-radius: 8px; border: 1px solid #3d4654; background: #12161b; color: #e8ecf1; }
+button, .exports a { background: #2f6fed; border-color: #2f6fed; color: #fff; cursor: pointer; text-decoration: none; }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+.progress { height: 12px; background: #2d3540; border-radius: 6px; overflow: hidden; }
+#progress-bar { height: 100%; width: 0; background: #2f6fed; transition: width 0.3s; }
+.error { background: #3d1f22; border: 1px solid #a33; padding: 12px; border-radius: 8px; white-space: pre-wrap; }
+#sheet-img, #anim-img { max-width: 100%; background: repeating-conic-gradient(#333 0 25%, #222 0 50%) 0 0 / 24px 24px; border: 1px solid #2d3540; }
+.player-controls { display: flex; gap: 10px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
+.player-controls input[type="range"] { flex: 1; }
+#frame-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; }
+#frame-grid img { width: 100%; cursor: pointer; border: 2px solid transparent; background: repeating-conic-gradient(#333 0 25%, #222 0 50%) 0 0 / 16px 16px; }
+#frame-grid img.active { border-color: #6ea8fe; }
+.exports { display: flex; gap: 10px; flex-wrap: wrap; }
+.exports a { padding: 9px 14px; border-radius: 8px; }

@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>spriteforge — 视频转序列帧</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <h1>spriteforge</h1>
+  <p>短视频 → AI 抠图 → Sprite Sheet（Unity 友好），本地运行，无需上传到第三方。</p>
+</header>
+
+<main>
+  <section class="card" id="import-card">
+    <h2>1. 导入视频</h2>
+    <div id="dropzone" tabindex="0" role="button" aria-label="选择或拖入视频文件">
+      <p>把视频拖到这里，或 <button type="button" id="pick-btn">选择文件</button></p>
+      <p class="hint">支持 mp4 / mov / webm / avi / mkv，单个文件上限 200MB；典型输入 1–3 秒、720×720 及以下。</p>
+      <input type="file" id="file-input" accept="video/mp4,video/quicktime,video/webm,video/x-msvideo,video/x-matroska,.mp4,.mov,.webm,.avi,.mkv" hidden>
+    </div>
+    <p id="file-info" class="hint"></p>
+    <video id="source-preview" controls muted playsinline hidden></video>
+  </section>
+
+  <section class="card">
+    <h2>2. 参数</h2>
+    <form id="params-form">
+      <label>抽帧帧率 fps <input type="number" id="fps" value="12" min="1" max="60" step="1"></label>
+      <label>合图列数 <input type="number" id="columns" value="6" min="1" max="64" step="1"></label>
+      <label>单元格间距 px <input type="number" id="spacing" value="4" min="0" max="64" step="1"></label>
+      <label>抠图模型
+        <select id="model">
+          <option value="birefnet-general" selected>birefnet-general（默认，质量最好）</option>
+          <option value="birefnet-general-lite">birefnet-general-lite（更快）</option>
+          <option value="birefnet-portrait">birefnet-portrait（人像特写）</option>
+          <option value="isnet-general-use">isnet-general-use（较快）</option>
+          <option value="u2net">u2net（最快，边缘较粗）</option>
+        </select>
+      </label>
+      <label>输入上限 px <input type="number" id="max-size" value="720" min="64" max="4096" step="1"></label>
+      <label>单帧目标尺寸（可选，如 512x512，留空则按最大裁剪尺寸）
+        <input type="text" id="target-size" placeholder="512x512"></label>
+      <label class="checkbox"><input type="checkbox" id="smoothing" checked> 时序平滑（3 帧 alpha 平均，减轻闪烁）</label>
+      <p class="hint">首次运行需联网下载模型（BiRefNet-general 约 1GB），下载期间进度会停在 20–30% 一段时间，属于正常现象，之后可离线使用。</p>
+      <button type="submit" id="start-btn" disabled>开始生成</button>
+    </form>
+  </section>
+
+  <section class="card" id="status-card">
+    <h2>3. 进度</h2>
+    <p id="status-text">尚未开始。请先导入视频。</p>
+    <div class="progress"><div id="progress-bar"></div></div>
+    <p id="error" class="error" hidden></p>
+  </section>
+
+  <section class="card" id="result-card" hidden>
+    <h2>4. 结果预览</h2>
+    <h3>Sprite Sheet</h3>
+    <img id="sheet-img" alt="Sprite Sheet 预览">
+    <h3>动画播放</h3>
+    <div class="player">
+      <img id="anim-img" alt="逐帧动画预览">
+      <div class="player-controls">
+        <button type="button" id="play-btn">播放</button>
+        <button type="button" id="pause-btn">暂停</button>
+        <input type="range" id="scrubber" min="0" value="0" step="1">
+        <span id="frame-label"></span>
+      </div>
+    </div>
+    <h3>逐帧</h3>
+    <div id="frame-grid"></div>
+    <h3>导出</h3>
+    <div class="exports">
+      <a id="dl-sprite" href="#" download="sprite.png">下载 sprite.png</a>
+      <a id="dl-index" href="#" download="index.json">下载 index.json</a>
+      <a id="dl-zip" href="#" download="spriteforge-export.zip">下载 ZIP（合图 + 索引 + 单帧）</a>
+    </div>
+    <p class="hint">Unity 使用：把 sprite.png 导入为 Sprite（Multiple），或按 index.json 里的 unity_x / unity_y（左下角原点）和 pivot（0.5, 0.5）用 Sprite.Create 逐帧创建。</p>
+  </section>
+</main>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

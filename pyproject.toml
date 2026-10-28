@@ -13,10 +13,14 @@ dependencies = [
     "rembg>=2.0.0",
     "Pillow>=10.0.0",
     "numpy>=1.24.0",
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.29.0",
+    "python-multipart>=0.0.9",
 ]
 
 [project.scripts]
 spriteforge = "spriteforge.cli:main"
+spriteforge-web = "spriteforge.web_app:main"
 
 [tool.setuptools.packages.find]
 include = ["spriteforge*"]
