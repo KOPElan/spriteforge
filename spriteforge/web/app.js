@@ -317,41 +317,72 @@
           noPreview.textContent = job.status === 'failed' ? '生成失败，无预览图' : '进行中，无预览图';
           card.appendChild(noPreview);
         }
-        var title = document.createElement('p');
-        title.textContent = formatTime(job.created_at) + ' · ' + job.id +
-          ' · ' + job.status + ' · ' + (job.frame_count || 0) + ' 帧' +
-          ' · 模型 ' + (params.model || '—') +
-          ' · fps ' + (params.fps || '—') +
-          (params.filename ? ' · ' + params.filename : '');
-        card.appendChild(title);
+        // Meta, one fact per line (previously a single long
+        // '·'-joined paragraph that wrapped awkwardly, especially
+        // when the filename itself was a long prompt-like name).
+        var meta = document.createElement('div');
+        meta.className = 'history-meta';
+        var metaTime = document.createElement('span');
+        metaTime.className = 'history-meta-time';
+        metaTime.textContent = formatTime(job.created_at);
+        meta.appendChild(metaTime);
+        var metaId = document.createElement('span');
+        metaId.textContent = job.id + ' · ' + job.status;
+        meta.appendChild(metaId);
+        var metaParams = document.createElement('span');
+        metaParams.textContent = (job.frame_count || 0) + ' 帧 · 模型 ' +
+          (params.model || '—') + ' · fps ' + (params.fps || '—');
+        meta.appendChild(metaParams);
+        if (params.filename) {
+          var metaFile = document.createElement('span');
+          metaFile.className = 'history-meta-file';
+          metaFile.textContent = params.filename;
+          metaFile.title = params.filename;
+          meta.appendChild(metaFile);
+        }
+        card.appendChild(meta);
         if (job.status === 'failed' && job.error) {
           var err = document.createElement('p');
           err.className = 'error';
           err.textContent = job.error;
           card.appendChild(err);
         }
+        // Actions, one horizontal icon row instead of four stacked
+        // full-width text buttons. Icons carry title + aria-label,
+        // so the meaning survives without the text label.
+        var actions = document.createElement('div');
+        actions.className = 'history-actions';
         if (job.status === 'completed') {
           var previewBtn = document.createElement('button');
           previewBtn.type = 'button';
-          previewBtn.textContent = '预览';
+          previewBtn.textContent = '👁';
+          previewBtn.title = '预览';
+          previewBtn.setAttribute('aria-label', '预览');
           previewBtn.addEventListener('click', function () { openPreviewModal(job); });
-          card.appendChild(previewBtn);
+          actions.appendChild(previewBtn);
           var editBtn = document.createElement('button');
           editBtn.type = 'button';
-          editBtn.textContent = '编辑';
+          editBtn.textContent = '✎';
+          editBtn.title = '编辑';
+          editBtn.setAttribute('aria-label', '编辑');
           editBtn.addEventListener('click', function () { loadJobIntoEditor(job.id); });
-          card.appendChild(editBtn);
+          actions.appendChild(editBtn);
           var dlZip = document.createElement('a');
           dlZip.href = '/api/jobs/' + job.id + '/export.zip';
           dlZip.download = 'spriteforge-export.zip';
-          dlZip.textContent = '下载 ZIP';
-          card.appendChild(dlZip);
+          dlZip.textContent = '⬇';
+          dlZip.title = '下载 ZIP';
+          dlZip.setAttribute('aria-label', '下载 ZIP');
+          actions.appendChild(dlZip);
         }
         var delBtn = document.createElement('button');
         delBtn.type = 'button';
-        delBtn.textContent = '删除';
+        delBtn.textContent = '🗑';
+        delBtn.title = '删除';
+        delBtn.setAttribute('aria-label', '删除');
         delBtn.addEventListener('click', function () { deleteHistoryJobs([job.id]); });
-        card.appendChild(delBtn);
+        actions.appendChild(delBtn);
+        card.appendChild(actions);
         historyGrid.appendChild(card);
       });
       updateHistorySelection();

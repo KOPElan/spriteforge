@@ -49,15 +49,25 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
      37 frames = 7 rows), so height:auto gave different heights;
      now every thumbnail is the same 240px box, with the sheet
      contained inside (aspect kept, never stretched or cropped).
-   - actions: preview/delete were <button>s but download-ZIP was a
-     plain text <a>; now all three are the same 42px full-width
-     button. The title paragraph grows to fill, so the buttons sit
-     at the bottom of the card. */
+   - actions: previously four stacked 42px full-width text buttons;
+     now a single horizontal row of 36px icon buttons (see
+     .history-actions). The meta block grows to fill, so the row
+     sits at the bottom of the card. */
 .history-card input.history-select { width: 20px; height: 20px; min-width: 20px; padding: 0; margin: 0; align-self: flex-start; accent-color: #2f6fed; cursor: pointer; }
 .history-card img { width: 100%; height: 240px; object-fit: contain; cursor: pointer; background: repeating-conic-gradient(#333 0 25%, #222 0 50%) 0 0 / 16px 16px; border: 1px solid #2d3540; box-sizing: border-box; }
-.history-card img + p { flex: 1; margin: 0; }
-.history-card button, .history-card a { display: flex; align-items: center; justify-content: center; width: 100%; height: 42px; min-height: 42px; padding: 0 10px; font-size: 15px; box-sizing: border-box; }
-.history-card a { background: #2f6fed; border: 1px solid #2f6fed; color: #fff; text-decoration: none; }
+/* Meta: one fact per line, so time / id / params / filename no
+   longer run together in a single wrapping paragraph. The meta
+   block grows to fill, so the action row sits at the bottom. */
+.history-meta { flex: 1; display: flex; flex-direction: column; gap: 2px; margin: 0; font-size: 13px; color: #aab4c0; min-width: 0; }
+.history-meta span { overflow-wrap: anywhere; }
+.history-meta-time { font-size: 14px; color: #e8ecf1; }
+.history-meta-file { color: #c8d0da; }
+/* Actions: a single horizontal icon row (preview / edit / download
+   / delete), one 36px button each, instead of four stacked 42px
+   full-width text buttons. */
+.history-actions { display: flex; gap: 6px; }
+.history-actions button, .history-actions a { display: flex; align-items: center; justify-content: center; flex: 1; height: 36px; min-height: 36px; padding: 0; font-size: 18px; box-sizing: border-box; }
+.history-actions a { background: #2f6fed; border: 1px solid #2f6fed; color: #fff; text-decoration: none; }
 .history-toolbar input[type="checkbox"] { width: 18px; height: 18px; padding: 0; margin: 0; }
 .edit-controls { display: flex; gap: 10px; align-items: end; flex-wrap: wrap; margin-bottom: 12px; }
 .edit-controls label { display: grid; gap: 6px; font-size: 14px; }
