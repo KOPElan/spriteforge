@@ -9,7 +9,7 @@
 # Prerequisites:
 # - Windows: Docker Desktop with WSL2 backend + WSL2-capable NVIDIA
 #   driver on the host (570+ for RTX 50-series). Verify first with:
-#     docker run --rm --gpus all nvidia/cuda:12.8-runtime-ubuntu22.04 nvidia-smi
+#     docker run --rm --gpus all nvidia/cuda:12.8.0-runtime-ubuntu22.04 nvidia-smi
 # - Native Linux: NVIDIA driver + NVIDIA Container Toolkit on the host.
 # If the GPU is not visible in the container, the app falls back to
 # CPU matting (slow) — check `docker compose -f docker-compose.gpu.yml

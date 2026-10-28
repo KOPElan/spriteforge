@@ -26,7 +26,7 @@ Windows 上需要 Docker Desktop + WSL2 后端 + 主机上支持 WSL2 的 NVIDIA
 NVIDIA Container Toolkit。先验证 GPU 透传：
 
 ```bash
-docker run --rm --gpus all nvidia/cuda:12.8-runtime-ubuntu22.04 nvidia-smi
+docker run --rm --gpus all nvidia/cuda:12.8.0-runtime-ubuntu22.04 nvidia-smi
 ```
 
 能看到显卡后，再用 GPU 版配置启动（它用 `Dockerfile.gpu`，CUDA 12.8 基础镜像，
