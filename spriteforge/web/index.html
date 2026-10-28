@@ -12,7 +12,13 @@
   <p>短视频 → AI 抠图 → Sprite Sheet（Unity 友好），本地运行，无需上传到第三方。</p>
 </header>
 
+<nav class="tabs" role="tablist">
+  <button type="button" class="tab-btn active" id="tab-btn-generate" role="tab" aria-selected="true">生成</button>
+  <button type="button" class="tab-btn" id="tab-btn-history" role="tab" aria-selected="false">历史记录</button>
+</nav>
+
 <main>
+  <div id="tab-generate">
   <section class="card" id="import-card">
     <h2>1. 导入视频</h2>
     <div id="dropzone" tabindex="0" role="button" aria-label="选择或拖入视频文件">
@@ -98,14 +104,45 @@
     </div>
     <p class="hint">Unity 使用：把 sprite.png 导入为 Sprite（Multiple），或按 index.json 里的 unity_x / unity_y（左下角原点）和 pivot（0.5, 0.5）用 Sprite.Create 逐帧创建。</p>
   </section>
+  </div>
 
+  <div id="tab-history" hidden>
   <section class="card" id="history-card">
-    <h2>5. 历史记录</h2>
-    <p class="hint">历史保存在 jobs/ 目录下，服务重启后仍可查看和删除；删除会连同该任务的原视频、单帧、合图一起删掉，导出过的结果请先另存。</p>
-    <button type="button" id="refresh-history-btn">刷新历史</button>
-    <div id="history-list"></div>
+    <h2>历史记录</h2>
+    <p class="hint">历史保存在 jobs/ 目录下，服务重启后仍可查看和删除；删除会连同该任务的原视频、单帧、合图一起删掉，导出过的结果请先另存。没有 job.json 的旧任务文件夹不会显示（项目还在开发阶段，不做向前兼容）。</p>
+    <div class="history-toolbar">
+      <label class="checkbox"><input type="checkbox" id="history-select-all"> 全选</label>
+      <button type="button" id="history-delete-selected-btn" disabled>删除选中</button>
+      <button type="button" id="refresh-history-btn">刷新历史</button>
+    </div>
+    <div id="history-grid"></div>
   </section>
+  </div>
 </main>
+
+<div id="preview-modal" hidden>
+  <div class="modal-backdrop" id="preview-modal-backdrop"></div>
+  <div class="modal-content">
+    <button type="button" id="preview-modal-close">关闭</button>
+    <h3 id="preview-modal-title"></h3>
+    <h4>Sprite Sheet</h4>
+    <img id="preview-modal-sheet" alt="Sprite Sheet 预览">
+    <h4>动画播放</h4>
+    <div class="player">
+      <img id="preview-modal-anim" alt="逐帧动画预览">
+      <div class="player-controls">
+        <button type="button" id="preview-modal-play">播放</button>
+        <button type="button" id="preview-modal-pause">暂停</button>
+        <input type="range" id="preview-modal-scrubber" min="0" value="0" step="1">
+        <span id="preview-modal-frame-label"></span>
+      </div>
+    </div>
+    <div class="exports">
+      <a id="preview-modal-dl-zip" href="#" download="spriteforge-export.zip">下载 ZIP（合图 + 索引 + 单帧）</a>
+      <a id="preview-modal-dl-sprite" href="#" download="sprite.png">下载 sprite.png</a>
+    </div>
+  </div>
+</div>
 
 <script src="/static/app.js"></script>
 </body>

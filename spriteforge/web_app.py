@@ -120,12 +120,14 @@ def _write_job_json(job_id: str) -> None:
 
 
 def _load_jobs_from_disk() -> None:
-    """Rebuild _jobs from jobs/*/job.json (or index.json for old jobs).
+    """Rebuild _jobs from jobs/*/job.json only.
 
-    Jobs that were running when the service stopped are marked failed,
-    because their worker thread is gone. This runs once, lazily, on
-    the first history / job lookup, so a --jobs-dir set at startup
-    is honoured.
+    No backwards compatibility: the project is still in development,
+    so folders without a job.json (jobs from before history existed)
+    are simply not shown in history. Jobs that were running when the
+    service stopped are marked failed, because their worker thread
+    is gone. This runs once, lazily, on the first history / job
+    lookup, so a --jobs-dir set at startup is honoured.
     """
     global _disk_loaded
     if _disk_loaded:
@@ -139,71 +141,25 @@ def _load_jobs_from_disk() -> None:
         job_id = job_dir.name
         if job_id in _jobs:
             continue
-        created_at = None
-        try:
-            created_at = datetime.fromtimestamp(
-                job_dir.stat().st_mtime).isoformat()
-        except OSError:
-            pass
         job_json = job_dir / "job.json"
-        if job_json.is_file():
-            try:
-                data = json.loads(job_json.read_text(encoding="utf-8"))
-            except (OSError, ValueError):
-                continue
-            job = {
-                "id": job_id,
-                "status": data.get("status", "failed"),
-                "progress": data.get("progress", 0),
-                "error": data.get("error"),
-                "message": data.get("message", ""),
-                "created_at": data.get("created_at") or created_at,
-                "params": data.get("params", {}),
-                "frames": data.get("frames", []),
-                "sheet_size": data.get("sheet_size"),
-                "frame_size": data.get("frame_size"),
-            }
-        else:
-            # Old jobs (created before job.json existed): recover what
-            # index.json and the output folder still tell us.
-            index_path = job_dir / "output" / "index.json"
-            sprite_path = job_dir / "output" / "sprite.png"
-            frames_dir = job_dir / "output" / "frames"
-            frames = []
-            if frames_dir.is_dir():
-                frames = sorted(p.name for p in frames_dir.glob("frame_*.png"))
-            if index_path.is_file() and sprite_path.is_file():
-                try:
-                    index = json.loads(index_path.read_text(encoding="utf-8"))
-                except (OSError, ValueError):
-                    index = {}
-                job = {
-                    "id": job_id,
-                    "status": "completed",
-                    "progress": 100,
-                    "error": None,
-                    "message": "完成（服务重启前创建，参数为恢复值）",
-                    "created_at": created_at,
-                    "params": {
-                        "fps": index.get("fps"),
-                        "columns": index.get("columns"),
-                        "spacing": index.get("spacing"),
-                    },
-                    "frames": frames,
-                    "sheet_size": index.get("sheet_size"),
-                    "frame_size": index.get("frame_size"),
-                }
-            else:
-                job = {
-                    "id": job_id,
-                    "status": "failed",
-                    "progress": 0,
-                    "error": "服务重启前未完成，记录丢失",
-                    "message": "生成失败",
-                    "created_at": created_at,
-                    "params": {},
-                    "frames": [],
-                }
+        if not job_json.is_file():
+            continue
+        try:
+            data = json.loads(job_json.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        job = {
+            "id": job_id,
+            "status": data.get("status", "failed"),
+            "progress": data.get("progress", 0),
+            "error": data.get("error"),
+            "message": data.get("message", ""),
+            "created_at": data.get("created_at"),
+            "params": data.get("params", {}),
+            "frames": data.get("frames", []),
+            "sheet_size": data.get("sheet_size"),
+            "frame_size": data.get("frame_size"),
+        }
         if job["status"] in ("queued", "processing"):
             job["status"] = "failed"
             job["error"] = "服务重启中断（任务未完成）"
@@ -445,6 +401,36 @@ def delete_job(job_id: str) -> dict:
     shutil.rmtree(_job_dir(job_id), ignore_errors=True)
     _jobs.pop(job_id, None)
     return {"ok": True, "id": job_id}
+
+
+@app.post("/api/jobs/batch-delete")
+def batch_delete_jobs(payload: dict) -> dict:
+    """Delete several history jobs at once. Body: {"ids": ["...", ...]}.
+
+    Per-job results are returned, so one running or missing job does
+    not block the rest. Running jobs are rejected, not deleted.
+    """
+    _load_jobs_from_disk()
+    ids = payload.get("ids") if isinstance(payload, dict) else None
+    if not isinstance(ids, list) or not ids:
+        raise HTTPException(status_code=400, detail="请提供要删除的任务 id 列表")
+    results = []
+    for job_id in ids:
+        job_id = str(job_id)
+        job = _jobs.get(job_id)
+        if job is None:
+            results.append({"id": job_id, "ok": False, "error": "任务不存在"})
+        elif job["status"] in ("queued", "processing"):
+            results.append({"id": job_id, "ok": False, "error": "任务正在运行，无法删除"})
+        else:
+            shutil.rmtree(_job_dir(job_id), ignore_errors=True)
+            _jobs.pop(job_id, None)
+            results.append({"id": job_id, "ok": True})
+    return {
+        "results": results,
+        "deleted": sum(1 for r in results if r["ok"]),
+        "failed": [r for r in results if not r["ok"]],
+    }
 
 
 def _require_output(job_id: str, filename: str) -> Path:
