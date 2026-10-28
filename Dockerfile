@@ -1,5 +1,5 @@
-# spriteforge Web UI — one-click deploy (no GPU build here; for GPU
-# inference, run locally on an NVIDIA machine instead, see README).
+# spriteforge Web UI — one-click deploy (CPU build).
+# For GPU inference, use Dockerfile.gpu + docker-compose.gpu.yml (see README).
 FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \

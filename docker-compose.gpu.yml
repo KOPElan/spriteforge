@@ -1,0 +1,38 @@
+# spriteforge Web UI — GPU deployment (NVIDIA).
+#
+# Usage (standalone, replaces the CPU compose file):
+#   docker compose -f docker-compose.gpu.yml up -d --build
+#   # then open http://localhost:8000
+# Stop:
+#   docker compose -f docker-compose.gpu.yml down
+#
+# Prerequisites:
+# - Windows: Docker Desktop with WSL2 backend + WSL2-capable NVIDIA
+#   driver on the host (570+ for RTX 50-series). Verify first with:
+#     docker run --rm --gpus all nvidia/cuda:12.8-runtime-ubuntu22.04 nvidia-smi
+# - Native Linux: NVIDIA driver + NVIDIA Container Toolkit on the host.
+# If the GPU is not visible in the container, the app falls back to
+# CPU matting (slow) — check `docker compose -f docker-compose.gpu.yml
+# logs` and run the nvidia-smi test above before debugging the app.
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.gpu
+    ports:
+      - "8000:8000"
+    environment:
+      - SPRITEFORGE_JOBS_DIR=/app/jobs
+    volumes:
+      # Job uploads/outputs survive container restarts. The model cache
+      # is intentionally not mounted by default; add a volume for
+      # ~/.cache or the rembg model dir if you want to keep it.
+      - ./jobs:/app/jobs
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [gpu]
+    # Local/LAN use only: this service has no auth. Do not publish
+    # port 8000 to the public internet without a reverse proxy + auth.

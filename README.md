@@ -19,6 +19,28 @@ docker compose up -d
 
 停止：`docker compose down`。任务上传和输出保存在项目下的 `jobs/` 目录。
 
+### 一键部署（Docker，GPU 版，NVIDIA 独显）
+
+Windows 上需要 Docker Desktop + WSL2 后端 + 主机上支持 WSL2 的 NVIDIA 驱动
+（50 系显卡建议驱动 570+，对应 CUDA 12.8）；Linux 本机需要主机驱动 +
+NVIDIA Container Toolkit。先验证 GPU 透传：
+
+```bash
+docker run --rm --gpus all nvidia/cuda:12.8-runtime-ubuntu22.04 nvidia-smi
+```
+
+能看到显卡后，再用 GPU 版配置启动（它用 `Dockerfile.gpu`，CUDA 12.8 基础镜像，
+并把 CPU 版 `onnxruntime` 换成 `onnxruntime-gpu`；抠图代码本来就会优先用
+CUDA，GPU 不可见时自动回落 CPU，不会直接报错）：
+
+```bash
+docker compose -f docker-compose.gpu.yml up -d --build
+# 然后打开 http://localhost:8000
+```
+
+停止：`docker compose -f docker-compose.gpu.yml down`。注意：GPU 版镜像比 CPU 版
+大很多，首次构建和首次运行下载约 1GB 模型都需要时间。
+
 ### 本地运行（不使用 Docker）
 
 ```bash
@@ -29,7 +51,8 @@ spriteforge-web
 ```
 
 GPU 机器上本地运行时，按安装一节把 `onnxruntime` 换成与 CUDA/驱动
-匹配的 `onnxruntime-gpu`，速度会快很多；Docker 镜像默认是 CPU 版。
+匹配的 `onnxruntime-gpu`，速度会快很多；默认 Docker 镜像是 CPU 版，
+GPU 版见上面一节。
 
 ### Web 界面功能
 
