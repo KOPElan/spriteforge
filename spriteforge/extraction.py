@@ -27,6 +27,12 @@ def check_ffmpeg() -> None:
 
 
 def _run(cmd: list[str]) -> None:
+    # -hide_banner keeps stderr short: without it, ffmpeg's ~2KB
+    # version banner alone fills the UI error field and pushes the
+    # actual error line out of view (that is what happened with the
+    # 5% failure: the real error was past the truncation point).
+    if cmd and cmd[0] == "ffmpeg" and "-hide_banner" not in cmd:
+        cmd = [cmd[0], "-hide_banner"] + cmd[1:]
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
         raise RuntimeError(
@@ -69,12 +75,19 @@ def normalize_to_max_size(
     If both sides are already <= ``max_size``, the input is returned
     unchanged (no re-encode, no upscale). Otherwise it is scaled down
     to fit inside the box, aspect preserved, no squash, no crop.
+
+    The scaled size is forced to even dimensions
+    (``force_divisible_by=2``): without it, a 1920x1080 video scales
+    to 720x405 and a 1080x1920 video to 405x720, and the default
+    libx264 encoder with yuv420p rejects odd widths/heights
+    ("height not divisible by 2"), failing the whole job at 5%.
     """
     w, h = get_video_size(input_path)
     if w <= max_size and h <= max_size:
         return input_path
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    vf = f"scale={max_size}:{max_size}:force_original_aspect_ratio=decrease"
+    vf = (f"scale={max_size}:{max_size}:force_original_aspect_ratio=decrease"
+          f":force_divisible_by=2")
     _run(
         [
             "ffmpeg", "-y",

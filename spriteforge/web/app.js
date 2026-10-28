@@ -464,8 +464,11 @@
         stopElapsed();
         updateElapsed();
         setStep('生成失败');
-        showError('生成失败：' + (job.error || '未知错误') +
-          '。常见原因：缺少 ffmpeg（请安装并加入 PATH）、模型首次下载失败（请检查网络后重试）。');
+        // Show the backend error as-is, without guessing causes:
+        // the old "缺少 ffmpeg / 模型下载失败" guess was shown for
+        // every failure and hid the real cause (e.g. the 5% scale
+        // failure, which had nothing to do with either).
+        showError('生成失败：' + (job.error || '未知错误'));
         // Terminal state: the start button must become usable again,
         // and retry offers one-click regeneration with the same file.
         // loadHistory() here only refreshes other jobs: failed jobs

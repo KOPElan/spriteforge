@@ -255,8 +255,11 @@ def _run_job(job_id: str) -> None:
         )
         _write_job_json(job_id)
     except Exception as exc:  # surfaced in the UI, not just the console
+        # Keep the TAIL of the error, not the head: ffmpeg's real
+        # error line comes at the end, and taking [:2000] used to
+        # fill the field with the version banner and hide the cause.
         _set(job_id, status="failed", message="生成失败",
-             error=str(exc)[:2000])
+             error=str(exc)[-2000:])
         # Failed jobs keep nothing on disk: delete the whole folder
         # (uploaded input, partial frames, job.json). The in-memory
         # record is kept only so the current page's poll can still
