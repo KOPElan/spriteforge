@@ -9,6 +9,8 @@
   var fileInfo = document.getElementById('file-info');
   var sourcePreview = document.getElementById('source-preview');
   var startBtn = document.getElementById('start-btn');
+  var retryBtn = document.getElementById('retry-btn');
+  var retryHint = document.getElementById('retry-hint');
   var statusText = document.getElementById('status-text');
   var progressBar = document.getElementById('progress-bar');
   var errorBox = document.getElementById('error');
@@ -20,6 +22,11 @@
   var scrubber = document.getElementById('scrubber');
   var frameLabel = document.getElementById('frame-label');
   var frameGrid = document.getElementById('frame-grid');
+  var historyList = document.getElementById('history-list');
+  var refreshHistoryBtn = document.getElementById('refresh-history-btn');
+  var resetParamsBtn = document.getElementById('reset-params-btn');
+  var PARAMS_KEY = 'spriteforge-params';
+  var historyPrefillDone = false;
 
   var selectedFile = null;
   var jobId = null;
@@ -40,6 +47,185 @@
   function setStatus(text, progress) {
     statusText.textContent = text;
     progressBar.style.width = (progress || 0) + '%';
+  }
+  function readFormParams() {
+    return {
+      fps: document.getElementById('fps').value,
+      columns: document.getElementById('columns').value,
+      spacing: document.getElementById('spacing').value,
+      model: document.getElementById('model').value,
+      max_size: document.getElementById('max-size').value,
+      target_size: document.getElementById('target-size').value.trim(),
+      temporal_smoothing: document.getElementById('smoothing').checked,
+      despill: document.getElementById('despill').checked,
+      despill_strength: document.getElementById('despill-strength').value,
+      despill_color: document.getElementById('despill-color').value,
+      despill_custom_color: document.getElementById('despill-custom-color').value
+    };
+  }
+  function applyParams(p) {
+    if (!p || typeof p !== 'object') return;
+    function setValue(id, v) {
+      if (v === undefined || v === null) return;
+      document.getElementById(id).value = v;
+    }
+    function setChecked(id, v) {
+      if (v === undefined || v === null) return;
+      document.getElementById(id).checked = (v === true || v === 'true' || v === 1 || v === '1');
+    }
+    setValue('fps', p.fps);
+    setValue('columns', p.columns);
+    setValue('spacing', p.spacing);
+    setValue('max-size', p.max_size);
+    setValue('target-size', p.target_size === null ? '' : p.target_size);
+    setValue('despill-strength', p.despill_strength);
+    setValue('despill-custom-color', p.despill_custom_color);
+    setChecked('smoothing', p.temporal_smoothing);
+    setChecked('despill', p.despill);
+    if (p.despill_color) {
+      var colorEl = document.getElementById('despill-color');
+      var colorFound = false;
+      for (var j = 0; j < colorEl.options.length; j++) {
+        if (colorEl.options[j].value === p.despill_color) { colorFound = true; break; }
+      }
+      if (colorFound) colorEl.value = p.despill_color;
+    }
+    updateDespillCustomRow();
+    if (p.model) {
+      var modelEl = document.getElementById('model');
+      var found = false;
+      for (var i = 0; i < modelEl.options.length; i++) {
+        if (modelEl.options[i].value === p.model) { found = true; break; }
+      }
+      if (found) modelEl.value = p.model;
+    }
+  }
+  function updateDespillCustomRow() {
+    var row = document.getElementById('despill-custom-color-row');
+    if (row) row.hidden = document.getElementById('despill-color').value !== 'custom';
+  }
+  document.getElementById('despill-color').addEventListener('change', updateDespillCustomRow);
+  function saveLastParams() {
+    try { localStorage.setItem(PARAMS_KEY, JSON.stringify(readFormParams())); } catch (e) {}
+  }
+  function loadLastParamsFromStorage() {
+    try {
+      var raw = localStorage.getItem(PARAMS_KEY);
+      if (!raw) return false;
+      applyParams(JSON.parse(raw));
+      return true;
+    } catch (e) { return false; }
+  }
+  function resetParams() {
+    applyParams({
+      fps: '12', columns: '6', spacing: '4', model: 'birefnet-general',
+      max_size: '720', target_size: '', temporal_smoothing: true,
+      despill: true, despill_strength: '1.0',
+      despill_color: 'green', despill_custom_color: '#00ff00'
+    });
+    // Save the defaults too, so a later page load (and the history
+    // fallback below) does not bring the old params back.
+    saveLastParams();
+  }
+  if (resetParamsBtn) resetParamsBtn.addEventListener('click', resetParams);
+  function formatTime(iso) {
+    if (!iso) return '';
+    var d = new Date(iso);
+    return isNaN(d.getTime()) ? iso : d.toLocaleString();
+  }
+  async function loadHistory() {
+    if (!historyList) return;
+    try {
+      var res = await fetch('/api/jobs');
+      if (!res.ok) throw new Error('历史加载失败（' + res.status + '）');
+      var data = await res.json();
+      var jobs = data.jobs || [];
+      // First history load only, and only if this browser has no saved
+      // params: fall back to the most recent history job, so a new
+      // browser / device still starts from the last used params.
+      // Later refreshes must not overwrite what the user is editing.
+      if (!historyPrefillDone) {
+        historyPrefillDone = true;
+        try {
+          if (!localStorage.getItem(PARAMS_KEY) && jobs.length && jobs[0].params) {
+            applyParams(jobs[0].params);
+          }
+        } catch (e) {}
+      }
+      historyList.innerHTML = '';
+      if (!jobs.length) {
+        historyList.textContent = '暂无历史记录。';
+        return;
+      }
+      jobs.forEach(function (job) {
+        var item = document.createElement('div');
+        var params = job.params || {};
+        var title = document.createElement('p');
+        title.textContent = formatTime(job.created_at) + ' · ' + job.id +
+          ' · ' + job.status + ' · ' + (job.frame_count || 0) + ' 帧' +
+          ' · 模型 ' + (params.model || '—') +
+          ' · fps ' + (params.fps || '—') +
+          ' · 列数 ' + (params.columns || '—') +
+          (params.filename ? ' · ' + params.filename : '');
+        item.appendChild(title);
+        if (job.status === 'failed' && job.error) {
+          var err = document.createElement('p');
+          err.className = 'error';
+          err.textContent = job.error;
+          item.appendChild(err);
+        }
+        if (job.status === 'completed') {
+          var viewBtn = document.createElement('button');
+          viewBtn.type = 'button';
+          viewBtn.textContent = '查看';
+          viewBtn.addEventListener('click', async function () {
+            var r = await fetch('/api/jobs/' + job.id);
+            if (!r.ok) { showError('查看失败（' + r.status + '）'); return; }
+            var full = await r.json();
+            jobId = full.id;
+            stopAnim();
+            showResult(full);
+          });
+          item.appendChild(viewBtn);
+          var dlSprite = document.createElement('a');
+          dlSprite.href = '/api/jobs/' + job.id + '/sprite.png';
+          dlSprite.download = 'sprite.png';
+          dlSprite.textContent = '下载合图';
+          item.appendChild(dlSprite);
+          var dlZip = document.createElement('a');
+          dlZip.href = '/api/jobs/' + job.id + '/export.zip';
+          dlZip.download = 'spriteforge-export.zip';
+          dlZip.textContent = '下载 ZIP';
+          item.appendChild(dlZip);
+        }
+        var delBtn = document.createElement('button');
+        delBtn.type = 'button';
+        delBtn.textContent = '删除';
+        delBtn.addEventListener('click', async function () {
+          if (!confirm('确定删除该任务吗？原视频、单帧和合图都会一起删掉，无法恢复。')) return;
+          var r = await fetch('/api/jobs/' + job.id, { method: 'DELETE' });
+          if (!r.ok) {
+            var d = await r.json().catch(function () { return {}; });
+            showError(d.detail || ('删除失败（' + r.status + '）'));
+            return;
+          }
+          if (jobId === job.id) resultCard.hidden = true;
+          loadHistory();
+        });
+        item.appendChild(delBtn);
+        historyList.appendChild(item);
+      });
+    } catch (err) {
+      historyList.textContent = err.message;
+    }
+  }
+  if (refreshHistoryBtn) refreshHistoryBtn.addEventListener('click', loadHistory);
+  function showRetry(show) {
+    // Retry reuses the already-selected file and current form params,
+    // so it only makes sense while that file is still in memory.
+    var ok = !!show && !!selectedFile;
+    retryBtn.hidden = !ok;
+    retryHint.hidden = !ok;
   }
   function setFile(file) {
     if (!file) return;
@@ -115,26 +301,39 @@
       var res = await fetch('/api/jobs/' + jobId);
       if (!res.ok) throw new Error('查询任务失败（' + res.status + '）');
       var job = await res.json();
-      setStatus('任务 ' + jobId + '：' + job.status + '（' + job.progress + '%）', job.progress);
+      var statusLine = '任务 ' + jobId + '：' + job.status + '（' + job.progress + '%）';
+      if (job.message) statusLine += ' — ' + job.message;
+      setStatus(statusLine, job.progress);
       if (job.status === 'completed') {
         clearInterval(pollTimer);
         setStatus('完成：共 ' + (job.frame_count || 0) + ' 帧', 100);
+        startBtn.disabled = false;
+        showRetry(false);
         showResult(job);
+        loadHistory();
       } else if (job.status === 'failed') {
         clearInterval(pollTimer);
         showError('生成失败：' + (job.error || '未知错误') +
           '。常见原因：缺少 ffmpeg（请安装并加入 PATH）、模型首次下载失败（请检查网络后重试）。');
+        // Terminal state: the start button must become usable again,
+        // and retry offers one-click regeneration with the same file.
+        startBtn.disabled = false;
+        showRetry(true);
+        loadHistory();
       }
     } catch (err) {
       clearInterval(pollTimer);
       showError('查询任务失败：' + err.message);
+      startBtn.disabled = false;
+      showRetry(true);
     }
   }
 
-  document.getElementById('params-form').addEventListener('submit', async function (e) {
-    e.preventDefault();
+  async function startJob() {
     clearError();
+    showRetry(false);
     if (!selectedFile) { showError('请先导入视频。'); return; }
+    saveLastParams();
     var form = new FormData();
     form.append('file', selectedFile);
     form.append('fps', document.getElementById('fps').value);
@@ -146,6 +345,8 @@
     form.append('temporal_smoothing', document.getElementById('smoothing').checked ? 'true' : 'false');
     form.append('despill', document.getElementById('despill').checked ? 'true' : 'false');
     form.append('despill_strength', document.getElementById('despill-strength').value);
+    form.append('despill_color', document.getElementById('despill-color').value);
+    form.append('despill_custom_color', document.getElementById('despill-custom-color').value);
     startBtn.disabled = true;
     resultCard.hidden = true;
     stopAnim();
@@ -162,6 +363,16 @@
     } catch (err) {
       showError(err.message);
       startBtn.disabled = false;
+      showRetry(true);
     }
+  }
+
+  document.getElementById('params-form').addEventListener('submit', function (e) {
+    e.preventDefault();
+    startJob();
   });
+  retryBtn.addEventListener('click', function () { startJob(); });
+  loadLastParamsFromStorage();
+  updateDespillCustomRow();
+  loadHistory();
 })();

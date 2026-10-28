@@ -1,14 +1,31 @@
 """Crop, standardise and compose matted frames into a sprite sheet.
 
 Order of operations:
-1. Crop each frame to its alpha bbox (non-transparent area).
+1. Crop, by default to the *union* alpha bbox across all frames
+   (min left/top, max right/bottom). Every frame is cropped to the
+   same box, so a frame's subject keeps its absolute position in the
+   cell and mask noise can no longer shift it from frame to frame.
+   Per-frame cropping (the old behaviour) centred each frame's own
+   bbox, which turned bbox jitter -- e.g. an isnet mask edge varying
+   by a few pixels -- into visible up/down/left/right jitter, and
+   also changed the scale factor per frame when a target size was
+   set. Use crop_mode="per-frame" to get the old behaviour back.
    ``getbbox()`` on the alpha channel keeps any pixel with alpha > 0,
    so soft edges are not clipped by a hard threshold.
 2. Standardise size: if --target-size is given, scale to fit inside it
    (aspect preserved) and pad transparently to exactly that size.
-   Otherwise, pad every frame transparently to the largest cropped
-   size, centred, so the sheet has one uniform cell size.
+   With union cropping all frames already share one size, so the
+   scale factor is identical for every frame. Otherwise, pad every
+   frame transparently to the largest cropped size, centred, so the
+   sheet has one uniform cell size.
 3. Compose row-major (left to right, top to bottom) with spacing.
+
+Note: union cropping preserves true motion -- a subject that really
+walks across the frame will move across the cell. For walk-in-place
+material that motion is small (body bob, limbs), and the result is a
+stable animation instead of jitter. A single outlier frame (e.g. a
+far-away stray mask pixel) widens the union for all frames, making
+the cell larger but still jitter-free; that is the intended trade-off.
 
 The index.json format is Unity-friendly (no FrameRonin compatibility
 is required):
@@ -43,6 +60,49 @@ def crop_to_alpha_bbox(img: Image.Image) -> Image.Image:
     return img.crop(bbox)
 
 
+def union_alpha_bbox(
+    frames: list[Image.Image],
+) -> tuple[int, int, int, int] | None:
+    """Union of every frame's alpha bbox; None if all frames are empty."""
+    left = top = None
+    right = bottom = None
+    for img in frames:
+        bbox = img.convert("RGBA").split()[-1].getbbox()
+        if bbox is None:
+            continue
+        l, t, r, b = bbox
+        left = l if left is None else min(left, l)
+        top = t if top is None else min(top, t)
+        right = r if right is None else max(right, r)
+        bottom = b if bottom is None else max(bottom, b)
+    if left is None:
+        return None
+    return (left, top, right, bottom)
+
+
+def crop_to_union_bbox(
+    frames: list[Image.Image],
+) -> list[Image.Image]:
+    """Crop every frame to the union alpha bbox.
+
+    Fully transparent frames become a transparent image of union size,
+    so they keep their place in the animation instead of breaking
+    the uniform cell size.
+    """
+    union = union_alpha_bbox(frames)
+    if union is None:
+        return [img.convert("RGBA") for img in frames]
+    w, h = union[2] - union[0], union[3] - union[1]
+    out = []
+    for img in frames:
+        rgba = img.convert("RGBA")
+        if rgba.split()[-1].getbbox() is None:
+            out.append(Image.new("RGBA", (w, h), (0, 0, 0, 0)))
+        else:
+            out.append(rgba.crop(union))
+    return out
+
+
 def _fit_and_pad(img: Image.Image, target_w: int, target_h: int) -> Image.Image:
     """Scale to fit inside target (aspect preserved), centre on transparent."""
     fitted = img.copy()
@@ -57,9 +117,19 @@ def _fit_and_pad(img: Image.Image, target_w: int, target_h: int) -> Image.Image:
 def standardize_frames(
     frames: list[Image.Image],
     target_size: tuple[int, int] | None,
+    crop_mode: str = "union",
 ) -> tuple[list[Image.Image], tuple[int, int]]:
-    """Crop, then unify size. Returns (frames, (frame_w, frame_h))."""
-    cropped = [crop_to_alpha_bbox(img.convert("RGBA")) for img in frames]
+    """Crop, then unify size. Returns (frames, (frame_w, frame_h)).
+
+    crop_mode="union" (default): crop all frames to the union bbox.
+    crop_mode="per-frame": crop each frame to its own bbox (old behaviour).
+    """
+    if crop_mode not in ("union", "per-frame"):
+        raise ValueError(f"Unknown crop_mode: {crop_mode!r} (expected 'union' or 'per-frame')")
+    if crop_mode == "union":
+        cropped = crop_to_union_bbox(frames)
+    else:
+        cropped = [crop_to_alpha_bbox(img.convert("RGBA")) for img in frames]
     if target_size is not None:
         tw, th = target_size
         return [_fit_and_pad(img, tw, th) for img in cropped], (tw, th)

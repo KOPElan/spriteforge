@@ -59,11 +59,17 @@ GPU 版见上面一节。
 - 导入：拖放或文件选择上传视频，上传后可直接预览原视频；单个文件上限 200MB
 - 参数：fps（默认 12）、列数（默认 6）、间距（默认 4）、模型（默认 birefnet-general）、
   输入上限（默认 720px）、单帧目标尺寸（可选）、时序平滑开关（默认开）、
-  边缘去绿边开关（默认开，强度默认 1.0，绿幕专用）
+  边缘去溢色开关（默认开，强度默认 1.0，幕布颜色可选绿/蓝/红/青/品红/黄或自定义）；提交过的参数会自动记住
+  （存在浏览器本地，下次打开直接沿用，换浏览器时第一次先用最近一次历史任务的参数，
+  也可点“恢复默认参数”回到默认值）
 - 进度：轮询任务状态（queued / processing / completed / failed），失败原因直接显示在页面上
-  （如缺少 ffmpeg、模型首次下载失败等），而不是只打在控制台
+  （如缺少 ffmpeg、模型首次下载失败等），而不是只打在控制台；加载模型时会明确提示
+  “首次使用需下载约 1 GB、进度会在 20% 停留一段时间”，失败后开始按钮恢复可用，
+  并可点“重新生成”用同一视频和参数直接再跑一次
 - 预览：Sprite Sheet 大图、按 fps 播放的逐帧动画（播放/暂停/拖动进度条）、逐帧缩略图网格
 - 导出：下载 sprite.png、index.json，或下载 ZIP（合图 + 索引 + 全部单帧）
+- 历史记录：每次任务的参数和结果以 job.json 保存在 jobs/ 下，服务重启后仍可查看；
+  历史列表里可查看旧任务、下载合图/ZIP，或手动删除单个任务（连同原视频、单帧、合图一起删掉）
 
 ### Web API（供脚本调用）
 
@@ -87,10 +93,14 @@ GPU 版见上面一节。
 - 输入上限 **720px**：已在上限内的原样使用、不放大；超过上限的按比例缩小到上限内，不压扁、不裁剪
 - 默认 **12 fps** 抽帧（可用 `--fps` 修改）
 - 用 **BiRefNet-general**（rembg）抠图，保留**软 alpha**，不做二值硬切
-- 抠图后默认做**边缘去绿边**：只处理轮廓附近的绿色溢色（绿色压到红蓝最大值），不碰内部，
-  绿幕源的绿边可去掉（可用 `--no-despill` 关闭，`--despill-strength` 调强度，`--despill-edge-width` 调边缘宽度）
+- 抠图后默认做**边缘去溢色**：只处理轮廓附近的幕布溢色（幕布主色压到其他通道最大值），不碰内部，
+  绿幕源的绿边可去掉（可用 `--no-despill` 关闭，`--despill-strength` 调强度，`--despill-edge-width` 调边缘宽度，
+  `--despill-color` 选幕布颜色：green/blue/red/cyan/magenta/yellow 或自定义 `#RRGGBB`；白/灰/黑色幕布无颜色溢色可去）
 - 对 alpha 通道做 3 帧滑动平均，减轻逐帧闪烁（可用 `--no-temporal-smoothing` 关闭）
-- 抠图后按 alpha bbox 裁剪，可选 `--target-size` 统一单帧尺寸
+- 抠图后按 alpha bbox 裁剪：默认用**全局统一裁剪框**（所有帧的并集框），
+  这样逐帧 mask 噪点不会让角色在格子里上下左右抖动，且目标尺寸下的缩放比例全帧一致；
+  可用 `--crop-mode per-frame` 恢复旧的逐帧单独裁剪（可能抖动）
+- 可选 `--target-size` 统一单帧尺寸
 - 输出单张序列帧 PNG + Sprite Sheet PNG + `index.json`
 
 ## 系统要求
@@ -142,9 +152,11 @@ python -m spriteforge --input video.mp4 --output out_dir \
 | `--spacing` | `4` | 单元格之间的像素间距 |
 | `--model` | `birefnet-general` | rembg 模型名，可换 `birefnet-general-lite`、`birefnet-portrait`、`u2net` 等 |
 | `--no-temporal-smoothing` | 关闭 | 关闭 3 帧 alpha 平滑 |
-| `--no-despill` | 关闭 | 关闭边缘去绿边 |
-| `--despill-strength` | `1.0` | 去绿边强度 0-1 |
-| `--despill-edge-width` | `3` | 去绿边边缘宽度（像素） |
+| `--crop-mode` | `union` | 裁剪模式：`union`（全局统一框，防抖动）或 `per-frame`（逐帧单独裁剪，旧行为） |
+| `--no-despill` | 关闭 | 关闭边缘去溢色 |
+| `--despill-strength` | `1.0` | 去溢色强度 0-1 |
+| `--despill-edge-width` | `3` | 去溢色边缘宽度（像素） |
+| `--despill-color` | `green` | 幕布颜色：green/blue/red/cyan/magenta/yellow 或自定义 `#RRGGBB` |
 | `--target-size` | 不指定 | 单帧目标尺寸，如 `512x512`；不指定时以最大裁剪尺寸为准 |
 | `--max-size` | `720` | 输入单边上限像素；低于上限不放大，超过上限按比例缩小 |
 

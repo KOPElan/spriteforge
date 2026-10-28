@@ -36,6 +36,7 @@ import tempfile
 import threading
 import uuid
 import zipfile
+from datetime import datetime
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
@@ -44,7 +45,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .cli import parse_target_size
 from .compose import compose_sheet, standardize_frames
-from .despill import despill_green_edge_frames
+from .despill import despill_edge_frames, resolve_color
 from .extraction import check_ffmpeg, extract_frames, normalize_to_max_size
 from .matting import DEFAULT_MODEL, get_session, matte_image
 from .smoothing import smooth_alpha
@@ -57,6 +58,7 @@ ALLOWED_EXTENSIONS = {".mp4", ".mov", ".webm", ".avi", ".mkv"}
 app = FastAPI(title="spriteforge", version="0.1.0")
 _jobs: dict[str, dict] = {}
 _jobs_lock = threading.Lock()
+_disk_loaded = False
 
 
 def _job_dir(job_id: str) -> Path:
@@ -70,14 +72,143 @@ def _public_job(job: dict) -> dict:
         "status": job["status"],
         "progress": job["progress"],
         "error": job["error"],
+        "message": job.get("message", ""),
+        "created_at": job.get("created_at"),
         "params": job["params"],
+        "frame_count": len(job.get("frames", [])),
     }
     if job["status"] == "completed":
         out["frames"] = job.get("frames", [])
-        out["frame_count"] = len(job.get("frames", []))
         out["sheet_size"] = job.get("sheet_size")
         out["frame_size"] = job.get("frame_size")
     return out
+
+
+def _job_json_path(job_id: str) -> Path:
+    return _job_dir(job_id) / "job.json"
+
+
+def _write_job_json(job_id: str) -> None:
+    """Persist one job's metadata to disk, so history survives restarts.
+
+    Only called on creation and on terminal states (completed/failed),
+    not on every progress update, to avoid a disk write per frame.
+    """
+    job = _jobs.get(job_id)
+    if job is None:
+        return
+    try:
+        _job_dir(job_id).mkdir(parents=True, exist_ok=True)
+        with open(_job_json_path(job_id), "w", encoding="utf-8") as f:
+            json.dump(
+                {
+                    "id": job["id"],
+                    "status": job["status"],
+                    "progress": job["progress"],
+                    "error": job["error"],
+                    "message": job.get("message", ""),
+                    "created_at": job.get("created_at"),
+                    "params": job["params"],
+                    "frames": job.get("frames", []),
+                    "sheet_size": job.get("sheet_size"),
+                    "frame_size": job.get("frame_size"),
+                },
+                f, indent=2, ensure_ascii=False,
+            )
+    except OSError:
+        pass  # history persistence must never break a running job
+
+
+def _load_jobs_from_disk() -> None:
+    """Rebuild _jobs from jobs/*/job.json (or index.json for old jobs).
+
+    Jobs that were running when the service stopped are marked failed,
+    because their worker thread is gone. This runs once, lazily, on
+    the first history / job lookup, so a --jobs-dir set at startup
+    is honoured.
+    """
+    global _disk_loaded
+    if _disk_loaded:
+        return
+    _disk_loaded = True
+    if not JOBS_DIR.is_dir():
+        return
+    for job_dir in sorted(JOBS_DIR.iterdir()):
+        if not job_dir.is_dir():
+            continue
+        job_id = job_dir.name
+        if job_id in _jobs:
+            continue
+        created_at = None
+        try:
+            created_at = datetime.fromtimestamp(
+                job_dir.stat().st_mtime).isoformat()
+        except OSError:
+            pass
+        job_json = job_dir / "job.json"
+        if job_json.is_file():
+            try:
+                data = json.loads(job_json.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            job = {
+                "id": job_id,
+                "status": data.get("status", "failed"),
+                "progress": data.get("progress", 0),
+                "error": data.get("error"),
+                "message": data.get("message", ""),
+                "created_at": data.get("created_at") or created_at,
+                "params": data.get("params", {}),
+                "frames": data.get("frames", []),
+                "sheet_size": data.get("sheet_size"),
+                "frame_size": data.get("frame_size"),
+            }
+        else:
+            # Old jobs (created before job.json existed): recover what
+            # index.json and the output folder still tell us.
+            index_path = job_dir / "output" / "index.json"
+            sprite_path = job_dir / "output" / "sprite.png"
+            frames_dir = job_dir / "output" / "frames"
+            frames = []
+            if frames_dir.is_dir():
+                frames = sorted(p.name for p in frames_dir.glob("frame_*.png"))
+            if index_path.is_file() and sprite_path.is_file():
+                try:
+                    index = json.loads(index_path.read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    index = {}
+                job = {
+                    "id": job_id,
+                    "status": "completed",
+                    "progress": 100,
+                    "error": None,
+                    "message": "完成（服务重启前创建，参数为恢复值）",
+                    "created_at": created_at,
+                    "params": {
+                        "fps": index.get("fps"),
+                        "columns": index.get("columns"),
+                        "spacing": index.get("spacing"),
+                    },
+                    "frames": frames,
+                    "sheet_size": index.get("sheet_size"),
+                    "frame_size": index.get("frame_size"),
+                }
+            else:
+                job = {
+                    "id": job_id,
+                    "status": "failed",
+                    "progress": 0,
+                    "error": "服务重启前未完成，记录丢失",
+                    "message": "生成失败",
+                    "created_at": created_at,
+                    "params": {},
+                    "frames": [],
+                }
+        if job["status"] in ("queued", "processing"):
+            job["status"] = "failed"
+            job["error"] = "服务重启中断（任务未完成）"
+            job["message"] = "生成失败"
+        _jobs[job_id] = job
 
 
 def _set(job_id: str, **kwargs) -> None:
@@ -93,7 +224,8 @@ def _run_job(job_id: str) -> None:
     out_dir = job_dir / "output"
     frames_out = out_dir / "frames"
     try:
-        _set(job_id, status="processing", progress=5)
+        _set(job_id, status="processing", progress=5,
+             message="正在准备：检查 ffmpeg、抽帧…")
         check_ffmpeg()
         target_size = parse_target_size(params.get("target_size") or None)
         input_path = job_dir / "input.mp4"
@@ -108,21 +240,30 @@ def _run_job(job_id: str) -> None:
             )
             if not extracted:
                 raise RuntimeError("没有从视频中提取到任何帧")
-            _set(job_id, progress=20)
-            # Per-frame matting (same session, same matte_image as the
-            # CLI path) so progress can advance during the slow step.
-            # First run downloads the model (~1 GB for BiRefNet-general)
-            # and will sit at ~20-30% for a while -- that is expected.
+            # Model load is the point where a first-time user can see
+            # progress sit at 20% for a long time: get_session()
+            # downloads the model (~1 GB for BiRefNet-general) on
+            # first use and reports no download progress, so say so
+            # explicitly instead of leaving a bare "20%".
+            _set(job_id, progress=20,
+                 message="正在加载抠图模型：如果是首次使用该模型，需联网下载约 1 GB，"
+                         "进度会在 20% 停留一段时间，请稍候，不要重复提交。")
             session = get_session(params["model"])
             total = len(extracted)
             matted = []
             for i, (path, _ts) in enumerate(extracted):
                 matted.append(matte_image(path, session))
-                _set(job_id, progress=20 + int(60 * (i + 1) / total))
+                _set(job_id, progress=20 + int(60 * (i + 1) / total),
+                     message=f"正在抠图：第 {i + 1} / {total} 帧…")
+            _set(job_id, message="正在去绿边、平滑与合成合图…")
             if params.get("despill", True):
-                matted = despill_green_edge_frames(
+                despill_color = params.get("despill_color", "green")
+                if params.get("despill_color") == "custom":
+                    despill_color = params.get("despill_custom_color", "#00ff00")
+                matted = despill_edge_frames(
                     matted, strength=params.get("despill_strength", 1.0),
                     edge_width=params.get("despill_edge_width", 3),
+                    color=despill_color,
                 )
             if params["temporal_smoothing"]:
                 matted = smooth_alpha(matted)
@@ -142,12 +283,15 @@ def _run_job(job_id: str) -> None:
                 columns=params["columns"], spacing=params["spacing"],
             )
         _set(
-            job_id, status="completed", progress=100,
+            job_id, status="completed", progress=100, message="完成",
             frames=names, sheet_size=index["sheet_size"],
             frame_size=index["frame_size"],
         )
+        _write_job_json(job_id)
     except Exception as exc:  # surfaced in the UI, not just the console
-        _set(job_id, status="failed", error=str(exc)[:2000])
+        _set(job_id, status="failed", message="生成失败",
+             error=str(exc)[:2000])
+        _write_job_json(job_id)
 
 
 def _safe_frame_path(job_id: str, name: str) -> Path:
@@ -177,6 +321,8 @@ async def create_job(
     despill: str = Form(default="true"),
     despill_strength: float = Form(default=1.0),
     despill_edge_width: int = Form(default=3),
+    despill_color: str = Form(default="green"),
+    despill_custom_color: str = Form(default="#00ff00"),
 ) -> JSONResponse:
     """Upload a video and start a job. Returns {"id": ...}."""
     if not file.filename:
@@ -228,7 +374,13 @@ async def create_job(
     smoothing = temporal_smoothing.strip().lower() in ("true", "1", "on", "yes")
     despill_on = despill.strip().lower() in ("true", "1", "on", "yes")
     if not 0 <= despill_strength <= 1 or despill_edge_width < 0:
-        raise HTTPException(status_code=400, detail="去绿边参数不合法：强度须在 0-1 之间，边缘宽度 >= 0")
+        raise HTTPException(status_code=400, detail="去溢色参数不合法：强度须在 0-1 之间，边缘宽度 >= 0")
+    despill_color_value = despill_color.strip().lower()
+    despill_custom_value = despill_custom_color.strip()
+    try:
+        resolve_color(despill_custom_value if despill_color_value == "custom" else despill_color_value)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     params = {
         "fps": fps, "columns": columns, "spacing": spacing,
         "model": model.strip(), "max_size": max_size,
@@ -237,28 +389,69 @@ async def create_job(
         "despill": despill_on,
         "despill_strength": despill_strength,
         "despill_edge_width": despill_edge_width,
+        "despill_color": despill_color_value,
+        "despill_custom_color": despill_custom_value,
         "filename": file.filename,
     }
     with _jobs_lock:
         _jobs[job_id] = {
             "id": job_id, "status": "queued", "progress": 0,
-            "error": None, "params": params,
+            "error": None, "message": "已排队，正在准备…",
+            "created_at": datetime.now().isoformat(),
+            "params": params,
         }
+    _write_job_json(job_id)
     thread = threading.Thread(target=_run_job, args=(job_id,), daemon=True)
     thread.start()
     return JSONResponse(status_code=202, content={"id": job_id})
+
+
+@app.get("/api/jobs")
+def list_jobs() -> dict:
+    """History, newest first. Loads jobs from disk on first call."""
+    _load_jobs_from_disk()
+    jobs = sorted(
+        _jobs.values(),
+        key=lambda j: j.get("created_at") or "",
+        reverse=True,
+    )
+    return {"jobs": [_public_job(job) for job in jobs]}
 
 
 @app.get("/api/jobs/{job_id}")
 def get_job(job_id: str) -> dict:
     job = _jobs.get(job_id)
     if job is None:
-        raise HTTPException(status_code=404, detail="任务不存在（服务重启后任务记录会丢失）")
+        _load_jobs_from_disk()
+        job = _jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="任务不存在")
     return _public_job(job)
+
+
+@app.delete("/api/jobs/{job_id}")
+def delete_job(job_id: str) -> dict:
+    """Delete one history entry and its files on disk.
+
+    Running jobs cannot be deleted: their worker thread is still
+    writing to the same folder.
+    """
+    _load_jobs_from_disk()
+    job = _jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    if job["status"] in ("queued", "processing"):
+        raise HTTPException(status_code=400, detail="任务正在运行，无法删除，请等待其完成或失败后再删")
+    shutil.rmtree(_job_dir(job_id), ignore_errors=True)
+    _jobs.pop(job_id, None)
+    return {"ok": True, "id": job_id}
 
 
 def _require_output(job_id: str, filename: str) -> Path:
     job = _jobs.get(job_id)
+    if job is None:
+        _load_jobs_from_disk()
+        job = _jobs.get(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="任务不存在")
     if job["status"] != "completed":
@@ -284,6 +477,9 @@ def get_index(job_id: str):
 @app.get("/api/jobs/{job_id}/frames/{name}")
 def get_frame(job_id: str, name: str):
     job = _jobs.get(job_id)
+    if job is None:
+        _load_jobs_from_disk()
+        job = _jobs.get(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="任务不存在")
     if job["status"] != "completed":

@@ -14,7 +14,7 @@ import tempfile
 from pathlib import Path
 
 from .compose import compose_sheet, standardize_frames
-from .despill import despill_green_edge_frames
+from .despill import despill_edge_frames, resolve_color
 from .extraction import check_ffmpeg, extract_frames, normalize_to_max_size
 from .matting import DEFAULT_MODEL, matte_frames
 from .smoothing import smooth_alpha
@@ -67,9 +67,22 @@ def build_parser() -> argparse.ArgumentParser:
         help="Edge band width in pixels for green-spill removal (default: 3)",
     )
     p.add_argument(
+        "--despill-color", default="green",
+        help="Backdrop colour for spill removal: green/blue/red/cyan/magenta/"
+        "yellow or a custom #RRGGBB (default: green). Grey/white/black "
+        "backdrops have no colour spill to remove, so they are a no-op.",
+    )
+    p.add_argument(
         "--target-size", default=None,
         help="Optional per-frame size WxH, e.g. 512x512. Default: keep cropped size, "
         "padded to the largest frame.",
+    )
+    p.add_argument(
+        "--crop-mode", choices=["union", "per-frame"], default="union",
+        help="Crop mode (default: union): 'union' crops all frames to the "
+        "same union bbox, so mask noise cannot jitter a frame's position "
+        "and the scale factor is identical for all frames; 'per-frame' "
+        "crops each frame to its own bbox (old behaviour, can jitter).",
     )
     p.add_argument(
         "--max-size", type=int, default=720,
@@ -95,6 +108,8 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     try:
         target_size = parse_target_size(args.target_size)
+        if not args.no_despill:
+            resolve_color(args.despill_color)
         check_ffmpeg()
     except (ValueError, RuntimeError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
@@ -119,13 +134,15 @@ def main(argv: list[str] | None = None) -> int:
         matted = matte_frames([p for p, _ in extracted], model=args.model)
 
         if args.no_despill:
-            print("Green-spill removal: off")
+            print("Spill removal: off")
         else:
-            matted = despill_green_edge_frames(
+            matted = despill_edge_frames(
                 matted, strength=args.despill_strength,
                 edge_width=args.despill_edge_width,
+                color=args.despill_color,
             )
-            print(f"Green-spill removal: on (strength={args.despill_strength}, "
+            print(f"Spill removal: on (color={args.despill_color}, "
+                  f"strength={args.despill_strength}, "
                   f"edge_width={args.despill_edge_width}px)")
 
         if args.no_temporal_smoothing:
@@ -135,7 +152,8 @@ def main(argv: list[str] | None = None) -> int:
             print("Temporal smoothing: 3-frame alpha moving average")
 
         timestamps = [t for _, t in extracted]
-        frames, (frame_w, frame_h) = standardize_frames(matted, target_size)
+        frames, (frame_w, frame_h) = standardize_frames(
+            matted, target_size, crop_mode=args.crop_mode)
 
         for i, img in enumerate(frames):
             img.save(frames_out / f"frame_{i:05d}.png", "PNG")
