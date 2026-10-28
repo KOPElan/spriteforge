@@ -181,7 +181,7 @@ def _run_job(job_id: str) -> None:
     frames_out = out_dir / "frames"
     try:
         _set(job_id, status="processing", progress=5,
-             message="正在准备：检查 ffmpeg、抽帧…")
+             message="准备中：抽帧")
         check_ffmpeg()
         target_size = parse_target_size(params.get("target_size") or None)
         input_path = job_dir / "input.mp4"
@@ -199,19 +199,20 @@ def _run_job(job_id: str) -> None:
             # Model load is the point where a first-time user can see
             # progress sit at 20% for a long time: get_session()
             # downloads the model (~1 GB for BiRefNet-general) on
-            # first use and reports no download progress, so say so
-            # explicitly instead of leaving a bare "20%".
+            # first use and reports no download progress. The step
+            # line stays short; the full explanation lives in the
+            # params hint, and the frontend elapsed timer keeps
+            # ticking so the card never looks dead.
             _set(job_id, progress=20,
-                 message="正在加载抠图模型：如果是首次使用该模型，需联网下载约 1 GB，"
-                         "进度会在 20% 停留一段时间，请稍候，不要重复提交。")
+                 message="加载抠图模型（首次需下载，稍候）")
             session = get_session(params["model"])
             total = len(extracted)
             matted = []
             for i, (path, _ts) in enumerate(extracted):
                 matted.append(matte_image(path, session))
                 _set(job_id, progress=20 + int(60 * (i + 1) / total),
-                     message=f"正在抠图：第 {i + 1} / {total} 帧…")
-            _set(job_id, message="正在去绿边、平滑与合成合图…")
+                     message=f"抠图中：第 {i + 1} / {total} 帧")
+            _set(job_id, message="去溢色、平滑、裁剪")
             if params.get("despill", True):
                 despill_color = params.get("despill_color", "green")
                 if params.get("despill_color") == "custom":
@@ -231,7 +232,7 @@ def _run_job(job_id: str) -> None:
                 name = f"frame_{i:05d}.png"
                 img.save(frames_out / name, "PNG")
                 names.append(name)
-            _set(job_id, progress=95)
+            _set(job_id, progress=95, message="合成合图")
             index = compose_sheet(
                 frames, timestamps,
                 sheet_path=out_dir / "sprite.png",
@@ -352,7 +353,7 @@ async def create_job(
     with _jobs_lock:
         _jobs[job_id] = {
             "id": job_id, "status": "queued", "progress": 0,
-            "error": None, "message": "已排队，正在准备…",
+            "error": None, "message": "排队中",
             "created_at": datetime.now().isoformat(),
             "params": params,
         }

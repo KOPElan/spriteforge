@@ -39,6 +39,11 @@
   var selectedFile = null;
   var jobId = null;
   var pollTimer = null;
+  // Elapsed timer: ticks every second independently of the 1.5s poll,
+  // so the progress card keeps visibly moving even while the backend
+  // percentage is stuck (e.g. at 20% during a first-time model download).
+  var elapsedTimer = null;
+  var elapsedStart = null;
   var frameNames = [];
   var frameIndex = 0;
   var animTimer = null;
@@ -55,6 +60,32 @@
   function setStatus(text, progress) {
     statusText.textContent = text;
     progressBar.style.width = (progress || 0) + '%';
+  }
+  function formatElapsed(ms) {
+    var total = Math.max(0, Math.floor(ms / 1000));
+    var h = Math.floor(total / 3600);
+    var m = Math.floor((total % 3600) / 60);
+    var s = total % 60;
+    function pad(n) { return (n < 10 ? '0' : '') + n; }
+    return h > 0 ? h + ':' + pad(m) + ':' + pad(s) : pad(m) + ':' + pad(s);
+  }
+  function updateElapsed() {
+    if (!elapsedStart) return;
+    document.getElementById('elapsed-text').textContent =
+      '已用时 ' + formatElapsed(Date.now() - elapsedStart);
+  }
+  function startElapsed() {
+    stopElapsed();
+    elapsedStart = Date.now();
+    updateElapsed();
+    elapsedTimer = setInterval(updateElapsed, 1000);
+  }
+  function stopElapsed() {
+    if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
+  }
+  function setStep(step) {
+    var el = document.getElementById('status-step');
+    el.textContent = step ? ' · ' + step : '';
   }
   function readFormParams() {
     return {
@@ -108,11 +139,21 @@
       if (found) modelEl.value = p.model;
     }
   }
-  function updateDespillCustomRow() {
+  function updateDespillGroup() {
+    // Group state: inner controls are disabled while despill is off,
+    // and the custom colour picker only appears when the backdrop
+    // itself is set to "custom" (and despill is on).
+    var on = document.getElementById('despill').checked;
+    document.getElementById('despill-color').disabled = !on;
+    document.getElementById('despill-strength').disabled = !on;
+    document.getElementById('despill-custom-color').disabled = !on;
     var row = document.getElementById('despill-custom-color-row');
-    if (row) row.hidden = document.getElementById('despill-color').value !== 'custom';
+    if (row) row.hidden = !on || document.getElementById('despill-color').value !== 'custom';
   }
-  document.getElementById('despill-color').addEventListener('change', updateDespillCustomRow);
+  // Kept name for callers below; it now updates the whole group.
+  function updateDespillCustomRow() { updateDespillGroup(); }
+  document.getElementById('despill-color').addEventListener('change', updateDespillGroup);
+  document.getElementById('despill').addEventListener('change', updateDespillGroup);
   function saveLastParams() {
     try { localStorage.setItem(PARAMS_KEY, JSON.stringify(readFormParams())); } catch (e) {}
   }
@@ -406,18 +447,23 @@
       var res = await fetch('/api/jobs/' + jobId);
       if (!res.ok) throw new Error('查询任务失败（' + res.status + '）');
       var job = await res.json();
-      var statusLine = '任务 ' + jobId + '：' + job.status + '（' + job.progress + '%）';
-      if (job.message) statusLine += ' — ' + job.message;
-      setStatus(statusLine, job.progress);
+      setStatus('任务 ' + jobId + '：' + job.status + '（' + job.progress + '%）', job.progress);
+      setStep(job.message || '');
       if (job.status === 'completed') {
         clearInterval(pollTimer);
+        stopElapsed();
+        updateElapsed();
         setStatus('完成：共 ' + (job.frame_count || 0) + ' 帧', 100);
+        setStep('完成');
         startBtn.disabled = false;
         showRetry(false);
         showResult(job);
         loadHistory();
       } else if (job.status === 'failed') {
         clearInterval(pollTimer);
+        stopElapsed();
+        updateElapsed();
+        setStep('生成失败');
         showError('生成失败：' + (job.error || '未知错误') +
           '。常见原因：缺少 ffmpeg（请安装并加入 PATH）、模型首次下载失败（请检查网络后重试）。');
         // Terminal state: the start button must become usable again,
@@ -428,6 +474,8 @@
       }
     } catch (err) {
       clearInterval(pollTimer);
+      stopElapsed();
+      setStep('查询失败，计时已停止');
       showError('查询任务失败：' + err.message);
       startBtn.disabled = false;
       showRetry(true);
@@ -455,17 +503,22 @@
     startBtn.disabled = true;
     resultCard.hidden = true;
     stopAnim();
+    startElapsed();
     setStatus('正在上传…', 0);
+    setStep('正在上传视频');
     try {
       var res = await fetch('/api/jobs', { method: 'POST', body: form });
       var data = await res.json().catch(function () { return {}; });
       if (!res.ok) throw new Error(data.detail || ('上传失败（' + res.status + '）'));
       jobId = data.id;
       setStatus('任务已创建：' + jobId + '，排队中…', 0);
+      setStep('排队中');
       if (pollTimer) clearInterval(pollTimer);
       pollTimer = setInterval(poll, 1500);
       poll();
     } catch (err) {
+      stopElapsed();
+      setStep('上传失败');
       showError(err.message);
       startBtn.disabled = false;
       showRetry(true);
