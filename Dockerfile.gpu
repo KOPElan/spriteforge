@@ -13,10 +13,12 @@
 # needed — if the GPU is not visible inside the container, it falls
 # back to CPU (slow) rather than failing.
 #
-# Base: CUDA 12.8 runtime on Ubuntu 24.04 (Python 3.12 in apt).
+# Base: CUDA 12.8 + cuDNN runtime on Ubuntu 24.04 (Python 3.12 in apt).
+# The cudnn-runtime variant is required: plain "runtime" does not ship
+# cuDNN, which onnxruntime-gpu needs for CUDAExecutionProvider.
 # If your driver only supports an older CUDA, change the tag to a
 # matching CUDA version AND the onnxruntime-gpu version accordingly.
-FROM nvidia/cuda:12.8.0-runtime-ubuntu24.04
+FROM nvidia/cuda:12.8.0-cudnn-runtime-ubuntu24.04
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -35,10 +37,14 @@ COPY spriteforge ./spriteforge
 
 # Install the app, then replace CPU onnxruntime with the GPU build.
 # Never install onnxruntime and onnxruntime-gpu at the same time.
+# Pin onnxruntime-gpu to 1.26.0: starting with 1.27, the PyPI default
+# build targets CUDA 13 and needs libcublasLt.so.13, which this CUDA
+# 12.8 base image does not provide (that mismatch makes the CUDA
+# provider fail to load and rembg silently falls back to slow CPU).
 RUN pip install --no-cache-dir --break-system-packages -r requirements.txt \
     && pip install --no-cache-dir --break-system-packages . \
     && pip uninstall -y --break-system-packages onnxruntime \
-    && pip install --no-cache-dir --break-system-packages onnxruntime-gpu
+    && pip install --no-cache-dir --break-system-packages "onnxruntime-gpu==1.26.0"
 
 RUN mkdir -p /app/jobs
 
