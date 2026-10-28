@@ -14,6 +14,7 @@ import tempfile
 from pathlib import Path
 
 from .compose import compose_sheet, standardize_frames
+from .despill import despill_green_edge_frames
 from .extraction import check_ffmpeg, extract_frames, normalize_to_max_size
 from .matting import DEFAULT_MODEL, matte_frames
 from .smoothing import smooth_alpha
@@ -51,6 +52,19 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--no-temporal-smoothing", action="store_true",
         help="Disable the 3-frame alpha smoothing",
+    )
+    p.add_argument(
+        "--no-despill", action="store_true",
+        help="Disable edge-only green-spill removal (on by default, "
+        "for green-screen material)",
+    )
+    p.add_argument(
+        "--despill-strength", type=float, default=1.0,
+        help="Green-spill removal strength 0-1 (default: 1.0)",
+    )
+    p.add_argument(
+        "--despill-edge-width", type=int, default=3,
+        help="Edge band width in pixels for green-spill removal (default: 3)",
     )
     p.add_argument(
         "--target-size", default=None,
@@ -103,6 +117,16 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Matting with model: {args.model} "
               "(first run downloads the model weights; GPU used if available)")
         matted = matte_frames([p for p, _ in extracted], model=args.model)
+
+        if args.no_despill:
+            print("Green-spill removal: off")
+        else:
+            matted = despill_green_edge_frames(
+                matted, strength=args.despill_strength,
+                edge_width=args.despill_edge_width,
+            )
+            print(f"Green-spill removal: on (strength={args.despill_strength}, "
+                  f"edge_width={args.despill_edge_width}px)")
 
         if args.no_temporal_smoothing:
             print("Temporal smoothing: off")

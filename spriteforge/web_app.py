@@ -44,6 +44,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .cli import parse_target_size
 from .compose import compose_sheet, standardize_frames
+from .despill import despill_green_edge_frames
 from .extraction import check_ffmpeg, extract_frames, normalize_to_max_size
 from .matting import DEFAULT_MODEL, get_session, matte_image
 from .smoothing import smooth_alpha
@@ -118,6 +119,11 @@ def _run_job(job_id: str) -> None:
             for i, (path, _ts) in enumerate(extracted):
                 matted.append(matte_image(path, session))
                 _set(job_id, progress=20 + int(60 * (i + 1) / total))
+            if params.get("despill", True):
+                matted = despill_green_edge_frames(
+                    matted, strength=params.get("despill_strength", 1.0),
+                    edge_width=params.get("despill_edge_width", 3),
+                )
             if params["temporal_smoothing"]:
                 matted = smooth_alpha(matted)
             timestamps = [t for _, t in extracted]
@@ -168,6 +174,9 @@ async def create_job(
     max_size: int = Form(default=720),
     target_size: str | None = Form(default=None),
     temporal_smoothing: str = Form(default="true"),
+    despill: str = Form(default="true"),
+    despill_strength: float = Form(default=1.0),
+    despill_edge_width: int = Form(default=3),
 ) -> JSONResponse:
     """Upload a video and start a job. Returns {"id": ...}."""
     if not file.filename:
@@ -217,11 +226,17 @@ async def create_job(
         raise HTTPException(status_code=400, detail="上传的文件为空")
 
     smoothing = temporal_smoothing.strip().lower() in ("true", "1", "on", "yes")
+    despill_on = despill.strip().lower() in ("true", "1", "on", "yes")
+    if not 0 <= despill_strength <= 1 or despill_edge_width < 0:
+        raise HTTPException(status_code=400, detail="去绿边参数不合法：强度须在 0-1 之间，边缘宽度 >= 0")
     params = {
         "fps": fps, "columns": columns, "spacing": spacing,
         "model": model.strip(), "max_size": max_size,
         "target_size": target_size or None,
         "temporal_smoothing": smoothing,
+        "despill": despill_on,
+        "despill_strength": despill_strength,
+        "despill_edge_width": despill_edge_width,
         "filename": file.filename,
     }
     with _jobs_lock:

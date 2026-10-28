@@ -144,6 +144,8 @@
     form.append('max_size', document.getElementById('max-size').value);
     form.append('target_size', document.getElementById('target-size').value.trim());
     form.append('temporal_smoothing', document.getElementById('smoothing').checked ? 'true' : 'false');
+    form.append('despill', document.getElementById('despill').checked ? 'true' : 'false');
+    form.append('despill_strength', document.getElementById('despill-strength').value);
     startBtn.disabled = true;
     resultCard.hidden = true;
     stopAnim();

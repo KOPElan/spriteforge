@@ -58,7 +58,8 @@ GPU 版见上面一节。
 
 - 导入：拖放或文件选择上传视频，上传后可直接预览原视频；单个文件上限 200MB
 - 参数：fps（默认 12）、列数（默认 6）、间距（默认 4）、模型（默认 birefnet-general）、
-  输入上限（默认 720px）、单帧目标尺寸（可选）、时序平滑开关（默认开）
+  输入上限（默认 720px）、单帧目标尺寸（可选）、时序平滑开关（默认开）、
+  边缘去绿边开关（默认开，强度默认 1.0，绿幕专用）
 - 进度：轮询任务状态（queued / processing / completed / failed），失败原因直接显示在页面上
   （如缺少 ffmpeg、模型首次下载失败等），而不是只打在控制台
 - 预览：Sprite Sheet 大图、按 fps 播放的逐帧动画（播放/暂停/拖动进度条）、逐帧缩略图网格
@@ -70,7 +71,7 @@ GPU 版见上面一节。
 |---|---|---|
 | GET | `/` | Web 界面 |
 | GET | `/api/health` | 健康检查 |
-| POST | `/api/jobs` | multipart 上传视频 + 表单参数（fps、columns、spacing、model、max_size、target_size、temporal_smoothing），返回 `{"id": ...}`（202） |
+| POST | `/api/jobs` | multipart 上传视频 + 表单参数（fps、columns、spacing、model、max_size、target_size、temporal_smoothing、despill、despill_strength、despill_edge_width），返回 `{"id": ...}`（202） |
 | GET | `/api/jobs/{id}` | 任务状态、进度、错误、帧列表 |
 | GET | `/api/jobs/{id}/sprite.png` | 合图下载 |
 | GET | `/api/jobs/{id}/index.json` | Unity 索引下载 |
@@ -86,6 +87,8 @@ GPU 版见上面一节。
 - 输入上限 **720px**：已在上限内的原样使用、不放大；超过上限的按比例缩小到上限内，不压扁、不裁剪
 - 默认 **12 fps** 抽帧（可用 `--fps` 修改）
 - 用 **BiRefNet-general**（rembg）抠图，保留**软 alpha**，不做二值硬切
+- 抠图后默认做**边缘去绿边**：只处理轮廓附近的绿色溢色（绿色压到红蓝最大值），不碰内部，
+  绿幕源的绿边可去掉（可用 `--no-despill` 关闭，`--despill-strength` 调强度，`--despill-edge-width` 调边缘宽度）
 - 对 alpha 通道做 3 帧滑动平均，减轻逐帧闪烁（可用 `--no-temporal-smoothing` 关闭）
 - 抠图后按 alpha bbox 裁剪，可选 `--target-size` 统一单帧尺寸
 - 输出单张序列帧 PNG + Sprite Sheet PNG + `index.json`
@@ -139,6 +142,9 @@ python -m spriteforge --input video.mp4 --output out_dir \
 | `--spacing` | `4` | 单元格之间的像素间距 |
 | `--model` | `birefnet-general` | rembg 模型名，可换 `birefnet-general-lite`、`birefnet-portrait`、`u2net` 等 |
 | `--no-temporal-smoothing` | 关闭 | 关闭 3 帧 alpha 平滑 |
+| `--no-despill` | 关闭 | 关闭边缘去绿边 |
+| `--despill-strength` | `1.0` | 去绿边强度 0-1 |
+| `--despill-edge-width` | `3` | 去绿边边缘宽度（像素） |
 | `--target-size` | 不指定 | 单帧目标尺寸，如 `512x512`；不指定时以最大裁剪尺寸为准 |
 | `--max-size` | `720` | 输入单边上限像素；低于上限不放大，超过上限按比例缩小 |
 

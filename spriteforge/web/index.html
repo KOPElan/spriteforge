@@ -43,6 +43,8 @@
       <label>单帧目标尺寸（可选，如 512x512，留空则按最大裁剪尺寸）
         <input type="text" id="target-size" placeholder="512x512"></label>
       <label class="checkbox"><input type="checkbox" id="smoothing" checked> 时序平滑（3 帧 alpha 平均，减轻闪烁）</label>
+      <label class="checkbox"><input type="checkbox" id="despill" checked> 边缘去绿边（绿幕专用，只处理轮廓附近的绿色溢色）</label>
+      <label>去绿边强度 <input type="number" id="despill-strength" value="1.0" min="0" max="1" step="0.1"></label>
       <p class="hint">首次运行需联网下载模型（BiRefNet-general 约 1GB），下载期间进度会停在 20–30% 一段时间，属于正常现象，之后可离线使用。</p>
       <button type="submit" id="start-btn" disabled>开始生成</button>
     </form>
