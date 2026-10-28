@@ -59,6 +59,19 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .history-card button, .history-card a { display: flex; align-items: center; justify-content: center; width: 100%; height: 42px; min-height: 42px; padding: 0 10px; font-size: 15px; box-sizing: border-box; }
 .history-card a { background: #2f6fed; border: 1px solid #2f6fed; color: #fff; text-decoration: none; }
 .history-toolbar input[type="checkbox"] { width: 18px; height: 18px; padding: 0; margin: 0; }
+.edit-controls { display: flex; gap: 10px; align-items: end; flex-wrap: wrap; margin-bottom: 12px; }
+.edit-controls label { display: grid; gap: 6px; font-size: 14px; }
+#edit-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; margin-bottom: 12px; }
+.edit-frame img { width: 100%; cursor: pointer; border: 2px solid transparent; background: repeating-conic-gradient(#333 0 25%, #222 0 50%) 0 0 / 16px 16px; }
+.edit-frame.excluded img { opacity: 0.35; filter: grayscale(1); }
+.edit-frame label { display: flex; gap: 6px; align-items: center; font-size: 12px; }
+.edit-frame label input { width: 16px; height: 16px; padding: 0; margin: 0; }
+.edit-compare { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+.edit-compare img { width: 100%; background: repeating-conic-gradient(#333 0 25%, #222 0 50%) 0 0 / 16px 16px; border: 1px solid #2d3540; }
+.edit-compare p { margin: 0 0 6px; font-size: 14px; }
+#edit-loop-img { max-width: 100%; background: repeating-conic-gradient(#333 0 25%, #222 0 50%) 0 0 / 24px 24px; border: 1px solid #2d3540; }
+#edit-suggestions p { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+#edit-suggestions button { flex-shrink: 0; }
 #preview-modal { position: fixed; inset: 0; z-index: 100; }
 #preview-modal .modal-backdrop { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.7); }
 #preview-modal .modal-content { position: relative; max-width: 900px; margin: 40px auto; max-height: calc(100vh - 80px); overflow: auto; background: #1c2128; border: 1px solid #2d3540; border-radius: 12px; padding: 18px; }

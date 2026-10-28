@@ -100,6 +100,40 @@
     </div>
     <h3>逐帧</h3>
     <div id="frame-grid"></div>
+    <h3>帧编辑（删帧 / 截循环段 / 重新合图）</h3>
+    <p class="hint">下面每帧的勾选表示保留，取消就是删掉该帧；也可以直接填起止帧只保留一段。重新合图不需要重新抠图，只用已抠好的单帧重算合图和索引，并生成一条新的历史记录，原任务保留不动。删帧后时序平滑不会重算，被删帧对相邻帧的一点点影响还会残留。</p>
+    <div class="edit-controls">
+      <label>起始帧 <input type="number" id="edit-start" min="1" value="1" step="1"></label>
+      <label>结束帧 <input type="number" id="edit-end" min="1" value="1" step="1"></label>
+      <button type="button" id="edit-apply-range-btn">只保留该范围</button>
+      <button type="button" id="edit-reset-btn">全部保留</button>
+      <span id="edit-count"></span>
+    </div>
+    <div id="edit-grid"></div>
+    <h4>首末对比（选中段的第一帧和最后一帧）</h4>
+    <div class="edit-compare">
+      <div><p>首帧 <span id="edit-first-label"></span></p><img id="edit-first-img" alt="选中段首帧"></div>
+      <div><p>末帧 <span id="edit-last-label"></span></p><img id="edit-last-img" alt="选中段末帧"></div>
+    </div>
+    <h4>循环预览（只播选中段，循环播放）</h4>
+    <div class="player">
+      <img id="edit-loop-img" alt="选中段循环预览">
+      <div class="player-controls">
+        <button type="button" id="edit-loop-play">播放</button>
+        <button type="button" id="edit-loop-pause">暂停</button>
+        <span id="edit-loop-label"></span>
+      </div>
+    </div>
+    <h4>自动循环建议</h4>
+    <p class="hint">按剪影差异算首尾跳变，跳变比接近 1 表示跳回首帧跟正常走一步差不多大；这只是建议，最终以循环预览的人眼为准，系统不知道哪段才是一个完整的走路动作。</p>
+    <button type="button" id="edit-suggest-btn">自动循环建议</button>
+    <div id="edit-suggestions"></div>
+    <div class="edit-controls">
+      <label>重新合图列数 <input type="number" id="edit-columns" min="1" value="6" step="1"></label>
+      <label>重新合图间距 px <input type="number" id="edit-spacing" min="0" value="4" step="1"></label>
+      <button type="button" id="edit-recompose-btn">用选中帧重新合图</button>
+    </div>
+    <p id="edit-result" class="hint"></p>
     <h3>导出</h3>
     <div class="exports">
       <a id="dl-sprite" href="#" download="sprite.png">下载 sprite.png</a>
@@ -144,6 +178,7 @@
     <div class="exports">
       <a id="preview-modal-dl-zip" href="#" download="spriteforge-export.zip">下载 ZIP（合图 + 索引 + 单帧）</a>
       <a id="preview-modal-dl-sprite" href="#" download="sprite.png">下载 sprite.png</a>
+      <button type="button" id="preview-modal-edit">编辑此任务（去生成页删帧 / 截循环段）</button>
     </div>
   </div>
 </div>

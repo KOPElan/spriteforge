@@ -39,6 +39,13 @@
   var selectedFile = null;
   var jobId = null;
   var pollTimer = null;
+  // Frame editor (main result card only; history jobs are loaded
+  // into the main result via loadJobIntoEditor, so there is one
+  // editor implementation, not two).
+  var editKeep = [];
+  var editLoopTimer = null;
+  var editLoopIndex = 0;
+  var editLoopNames = [];
   // Elapsed timer: ticks every second independently of the 1.5s poll,
   // so the progress card keeps visibly moving even while the backend
   // percentage is stuck (e.g. at 20% during a first-time model download).
@@ -251,6 +258,11 @@
   }
   document.getElementById('preview-modal-close').addEventListener('click', closePreviewModal);
   document.getElementById('preview-modal-backdrop').addEventListener('click', closePreviewModal);
+  document.getElementById('preview-modal-edit').addEventListener('click', function () {
+    var id = modalJobId;
+    closePreviewModal();
+    if (id) loadJobIntoEditor(id);
+  });
   document.getElementById('preview-modal-play').addEventListener('click', playModalAnim);
   document.getElementById('preview-modal-pause').addEventListener('click', stopModalAnim);
   document.getElementById('preview-modal-scrubber').addEventListener('input', function () {
@@ -324,6 +336,11 @@
           previewBtn.textContent = '预览';
           previewBtn.addEventListener('click', function () { openPreviewModal(job); });
           card.appendChild(previewBtn);
+          var editBtn = document.createElement('button');
+          editBtn.type = 'button';
+          editBtn.textContent = '编辑';
+          editBtn.addEventListener('click', function () { loadJobIntoEditor(job.id); });
+          card.appendChild(editBtn);
           var dlZip = document.createElement('a');
           dlZip.href = '/api/jobs/' + job.id + '/export.zip';
           dlZip.download = 'spriteforge-export.zip';
@@ -440,6 +457,174 @@
     resultCard.hidden = false;
     showFrame(0);
     playAnim();
+    initEditor(job);
+  }
+
+  function editSelectedIndices() {
+    var out = [];
+    editKeep.forEach(function (keep, i) { if (keep) out.push(i); });
+    return out;
+  }
+  function stopEditLoop() { if (editLoopTimer) { clearInterval(editLoopTimer); editLoopTimer = null; } }
+  function showEditLoopFrame(i) {
+    if (!editLoopNames.length || !jobId) return;
+    editLoopIndex = (i + editLoopNames.length) % editLoopNames.length;
+    document.getElementById('edit-loop-img').src =
+      '/api/jobs/' + jobId + '/frames/' + encodeURIComponent(editLoopNames[editLoopIndex]);
+    document.getElementById('edit-loop-label').textContent =
+      (editLoopIndex + 1) + ' / ' + editLoopNames.length + '（选中段内第 ' + (editLoopIndex + 1) + ' 帧）';
+  }
+  function playEditLoop() {
+    stopEditLoop();
+    if (!editLoopNames.length) return;
+    editLoopTimer = setInterval(function () { showEditLoopFrame(editLoopIndex + 1); }, 1000 / Math.max(animFps, 1));
+  }
+  function updateEditor() {
+    var selected = editSelectedIndices();
+    document.getElementById('edit-count').textContent =
+      '已选 ' + selected.length + ' / ' + frameNames.length + ' 帧';
+    var first = selected.length ? selected[0] : -1;
+    var last = selected.length ? selected[selected.length - 1] : -1;
+    document.getElementById('edit-first-label').textContent = first >= 0 ? '第 ' + (first + 1) + ' 帧' : '—';
+    document.getElementById('edit-last-label').textContent = last >= 0 ? '第 ' + (last + 1) + ' 帧' : '—';
+    document.getElementById('edit-first-img').src = first >= 0 ? frameUrl(frameNames[first]) : '';
+    document.getElementById('edit-last-img').src = last >= 0 ? frameUrl(frameNames[last]) : '';
+    // Loop preview follows the current selection.
+    stopEditLoop();
+    editLoopNames = selected.map(function (i) { return frameNames[i]; });
+    editLoopIndex = 0;
+    if (editLoopNames.length) showEditLoopFrame(0);
+    // Reflect keep state on the edit grid without rebuilding it
+    // (rebuilding on every checkbox click would lose the click).
+    var cells = document.getElementById('edit-grid').querySelectorAll('.edit-frame');
+    cells.forEach(function (cell, i) {
+      cell.classList.toggle('excluded', !editKeep[i]);
+      var box = cell.querySelector('input');
+      if (box) box.checked = !!editKeep[i];
+    });
+  }
+  function renderEditGrid() {
+    var grid = document.getElementById('edit-grid');
+    grid.innerHTML = '';
+    frameNames.forEach(function (name, i) {
+      var cell = document.createElement('div');
+      cell.className = 'edit-frame';
+      var img = document.createElement('img');
+      img.src = frameUrl(name);
+      img.alt = name;
+      img.loading = 'lazy';
+      img.addEventListener('click', function () { stopAnim(); showFrame(i); });
+      cell.appendChild(img);
+      var label = document.createElement('label');
+      var box = document.createElement('input');
+      box.type = 'checkbox';
+      box.checked = !!editKeep[i];
+      box.addEventListener('change', function () { editKeep[i] = box.checked; updateEditor(); });
+      label.appendChild(box);
+      label.appendChild(document.createTextNode('第 ' + (i + 1) + ' 帧'));
+      cell.appendChild(label);
+      grid.appendChild(cell);
+    });
+    updateEditor();
+  }
+  function initEditor(job) {
+    editKeep = frameNames.map(function () { return true; });
+    document.getElementById('edit-start').value = 1;
+    document.getElementById('edit-end').value = frameNames.length;
+    document.getElementById('edit-columns').value = (job.params && job.params.columns) || 6;
+    document.getElementById('edit-spacing').value = (job.params && job.params.spacing) || 4;
+    document.getElementById('edit-suggestions').innerHTML = '';
+    document.getElementById('edit-result').textContent = '';
+    renderEditGrid();
+  }
+  document.getElementById('edit-apply-range-btn').addEventListener('click', function () {
+    var s = Math.max(1, parseInt(document.getElementById('edit-start').value, 10) || 1) - 1;
+    var e = Math.min(frameNames.length, parseInt(document.getElementById('edit-end').value, 10) || frameNames.length) - 1;
+    if (e < s) { document.getElementById('edit-result').textContent = '起始帧不能大于结束帧。'; return; }
+    editKeep = frameNames.map(function (_, i) { return i >= s && i <= e; });
+    document.getElementById('edit-result').textContent = '';
+    renderEditGrid();
+  });
+  document.getElementById('edit-reset-btn').addEventListener('click', function () {
+    editKeep = frameNames.map(function () { return true; });
+    renderEditGrid();
+  });
+  document.getElementById('edit-loop-play').addEventListener('click', playEditLoop);
+  document.getElementById('edit-loop-pause').addEventListener('click', stopEditLoop);
+  document.getElementById('edit-suggest-btn').addEventListener('click', async function () {
+    var box = document.getElementById('edit-suggestions');
+    box.textContent = '正在计算循环建议…';
+    try {
+      // Adaptive floor: the backend default min_length is 8, which
+      // would return nothing for a job with fewer than 8 frames.
+      var minLen = Math.min(8, Math.max(2, Math.floor(frameNames.length / 2)));
+      var res = await fetch('/api/jobs/' + jobId + '/loop-suggestions', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ min_length: minLen })
+      });
+      var data = await res.json().catch(function () { return {}; });
+      if (!res.ok) throw new Error(data.detail || ('建议失败（' + res.status + '）'));
+      var list = data.suggestions || [];
+      box.innerHTML = '';
+      if (!list.length) { box.textContent = '没有符合条件的循环段（帧数太少或姿态变化太小）。'; return; }
+      list.forEach(function (sug) {
+        var item = document.createElement('p');
+        item.textContent = '第 ' + sug.start_frame + '–' + sug.end_frame + ' 帧（共 ' + sug.length + ' 帧）' +
+          ' · 跳变比 ' + sug.jump_ratio + '× · 方向 ' + sug.direction + ' · 评分 ' + sug.score + '（越低越好）';
+        var applyBtn = document.createElement('button');
+        applyBtn.type = 'button';
+        applyBtn.textContent = '应用这段';
+        applyBtn.addEventListener('click', function () {
+          editKeep = frameNames.map(function (_, i) { return i >= sug.start && i <= sug.end; });
+          document.getElementById('edit-start').value = sug.start_frame;
+          document.getElementById('edit-end').value = sug.end_frame;
+          renderEditGrid();
+        });
+        item.appendChild(applyBtn);
+        box.appendChild(item);
+      });
+    } catch (err) {
+      box.textContent = err.message;
+    }
+  });
+  document.getElementById('edit-recompose-btn').addEventListener('click', async function () {
+    var selected = editSelectedIndices();
+    var resultEl = document.getElementById('edit-result');
+    if (selected.length < 2) { resultEl.textContent = '至少保留 2 帧才能重新合图。'; return; }
+    resultEl.textContent = '正在重新合图…';
+    try {
+      var res = await fetch('/api/jobs/' + jobId + '/recompose', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          indices: selected,
+          columns: parseInt(document.getElementById('edit-columns').value, 10),
+          spacing: parseInt(document.getElementById('edit-spacing').value, 10)
+        })
+      });
+      var data = await res.json().catch(function () { return {}; });
+      if (!res.ok) throw new Error(data.detail || ('重新合图失败（' + res.status + '）'));
+      resultEl.textContent = '已生成新任务 ' + data.id + '（共 ' + (data.frame_count || 0) + ' 帧），原任务保留不动，新任务已显示在上方结果区和历史记录里。';
+      jobId = data.id;
+      stopAnim();
+      showResult(data);
+      loadHistory();
+    } catch (err) {
+      resultEl.textContent = err.message;
+    }
+  });
+  async function loadJobIntoEditor(id) {
+    try {
+      var r = await fetch('/api/jobs/' + id);
+      if (!r.ok) { showError('加载任务失败（' + r.status + '）'); return; }
+      var full = await r.json();
+      if (full.status !== 'completed') { showError('该任务尚未完成，无法编辑。'); return; }
+      jobId = full.id;
+      stopAnim();
+      showResult(full);
+      switchTab('generate');
+    } catch (err) {
+      showError(err.message);
+    }
   }
 
   async function poll() {

@@ -46,6 +46,7 @@ from fastapi.staticfiles import StaticFiles
 from .cli import parse_target_size
 from .compose import compose_sheet, standardize_frames
 from .despill import despill_edge_frames, resolve_color
+from .loop import suggest_loops
 from .extraction import check_ffmpeg, extract_frames, normalize_to_max_size
 from .matting import DEFAULT_MODEL, get_session, matte_image
 from .smoothing import smooth_alpha
@@ -416,6 +417,137 @@ def get_job(job_id: str) -> dict:
     if job is None:
         raise HTTPException(status_code=404, detail="任务不存在")
     return _public_job(job)
+
+
+def _get_completed_job(job_id: str) -> dict:
+    """Job record for frame editing; completed jobs only."""
+    job = _jobs.get(job_id)
+    if job is None:
+        _load_jobs_from_disk()
+        job = _jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    if job["status"] != "completed":
+        raise HTTPException(status_code=400, detail=f"任务尚未完成，当前状态：{job['status']}")
+    return job
+
+
+@app.post("/api/jobs/{job_id}/loop-suggestions")
+def loop_suggestions(job_id: str, payload: dict | None = None) -> dict:
+    """Suggest loop segments for a completed job (see loop.py).
+
+    Body (all optional): {"min_length": 8, "max_length": 36}.
+    Scores the finished frames only -- no video, no model, no GPU.
+    """
+    job = _get_completed_job(job_id)
+    frames_dir = _job_dir(job_id) / "output" / "frames"
+    paths = []
+    for name in job.get("frames", []):
+        path = frames_dir / name
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail=f"单帧文件缺失：{name}")
+        paths.append(path)
+    body = payload or {}
+    try:
+        min_length = int(body.get("min_length", 8))
+        max_length = body.get("max_length")
+        max_length = None if max_length is None else int(max_length)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="min_length / max_length 须为整数")
+    return {
+        "job_id": job_id,
+        "frame_count": len(paths),
+        "suggestions": suggest_loops(paths, min_length=min_length, max_length=max_length),
+    }
+
+
+@app.post("/api/jobs/{job_id}/recompose")
+def recompose_job(job_id: str, payload: dict) -> dict:
+    """Re-compose a new history job from a subset of a completed job.
+
+    Body: {"indices": [0, 5, 6, ...], "columns": 6, "spacing": 4}.
+    Indices are in original frame order and are sorted here, so a
+    selection is always a subsequence, never a reorder. The original
+    job is kept untouched; the new job has no input video (it was
+    built from finished frames, not from video), and its timestamps
+    are recomputed as i / fps, so playback speed in Unity is
+    unchanged. Frames are already standardised to one cell size, so
+    they are composed as-is, with no re-crop and no re-matting.
+    """
+    job = _get_completed_job(job_id)
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="请提供要保留的帧序号列表")
+    raw = payload.get("indices")
+    if not isinstance(raw, list) or not raw:
+        raise HTTPException(status_code=400, detail="请提供要保留的帧序号列表")
+    try:
+        indices = sorted(set(int(i) for i in raw))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="帧序号须为整数")
+    names = job.get("frames", [])
+    if len(indices) < 2 or any(i < 0 or i >= len(names) for i in indices):
+        raise HTTPException(status_code=400, detail="帧序号超出范围，至少保留 2 帧")
+    params = job["params"]
+    columns = payload.get("columns", params.get("columns", 6))
+    spacing = payload.get("spacing", params.get("spacing", 4))
+    try:
+        columns = int(columns)
+        spacing = int(spacing)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="列数 / 间距须为整数")
+    if columns < 1 or spacing < 0:
+        raise HTTPException(status_code=400, detail="列数 >= 1，间距 >= 0")
+
+    from PIL import Image
+
+    frames_dir = _job_dir(job_id) / "output" / "frames"
+    images = []
+    for i in indices:
+        path = frames_dir / names[i]
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail=f"单帧文件缺失：{names[i]}")
+        images.append(Image.open(path).convert("RGBA"))
+    fps = params.get("fps") or 12
+    try:
+        fps = float(fps)
+    except (TypeError, ValueError):
+        fps = 12.0
+    if fps <= 0:
+        fps = 12.0
+
+    new_id = uuid.uuid4().hex[:12]
+    new_dir = _job_dir(new_id)
+    new_frames_dir = new_dir / "output" / "frames"
+    new_frames_dir.mkdir(parents=True, exist_ok=True)
+    new_names = []
+    for k, img in enumerate(images):
+        name = f"frame_{k:05d}.png"
+        img.save(new_frames_dir / name, "PNG")
+        new_names.append(name)
+    index = compose_sheet(
+        images,
+        [k / fps for k in range(len(images))],
+        sheet_path=new_dir / "output" / "sprite.png",
+        index_path=new_dir / "output" / "index.json",
+        columns=columns, spacing=spacing,
+    )
+    new_params = dict(params)
+    new_params["columns"] = columns
+    new_params["spacing"] = spacing
+    new_params["derived_from"] = job_id
+    new_job = {
+        "id": new_id, "status": "completed", "progress": 100,
+        "error": None, "message": "完成（重新合图）",
+        "created_at": datetime.now().isoformat(),
+        "params": new_params,
+        "frames": new_names,
+        "sheet_size": index["sheet_size"],
+        "frame_size": index["frame_size"],
+    }
+    with _jobs_lock:
+        _jobs[new_id] = new_job
+    _write_job_json(new_id)
+    return _public_job(new_job)
 
 
 @app.delete("/api/jobs/{job_id}")
