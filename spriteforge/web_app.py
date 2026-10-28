@@ -91,8 +91,10 @@ def _job_json_path(job_id: str) -> Path:
 def _write_job_json(job_id: str) -> None:
     """Persist one job's metadata to disk, so history survives restarts.
 
-    Only called on creation and on terminal states (completed/failed),
-    not on every progress update, to avoid a disk write per frame.
+    Only called on creation and on completion, not on every progress
+    update, to avoid a disk write per frame. Failed jobs are never
+    persisted: their files are deleted on failure (see _run_job),
+    so there is no failed-job record to write.
     """
     job = _jobs.get(job_id)
     if job is None:
@@ -124,10 +126,14 @@ def _load_jobs_from_disk() -> None:
 
     No backwards compatibility: the project is still in development,
     so folders without a job.json (jobs from before history existed)
-    are simply not shown in history. Jobs that were running when the
-    service stopped are marked failed, because their worker thread
-    is gone. This runs once, lazily, on the first history / job
-    lookup, so a --jobs-dir set at startup is honoured.
+    are simply not shown in history. Failed jobs, and jobs that were
+    running when the service stopped (their worker thread is gone,
+    so they can never complete), are treated as failed: their
+    folders are deleted here and they are not loaded, so old failed
+    leftovers from before this cleanup rule also disappear on the
+    next restart instead of lingering on disk. This runs once,
+    lazily, on the first history / job lookup, so a --jobs-dir set
+    at startup is honoured.
     """
     global _disk_loaded
     if _disk_loaded:
@@ -148,9 +154,16 @@ def _load_jobs_from_disk() -> None:
             data = json.loads(job_json.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue
+        status = data.get("status", "failed")
+        if status in ("failed", "queued", "processing"):
+            # Failed, or interrupted by a restart: nothing to keep.
+            # Delete the folder (input, partial frames, job.json)
+            # instead of loading a failed record into history.
+            shutil.rmtree(job_dir, ignore_errors=True)
+            continue
         job = {
             "id": job_id,
-            "status": data.get("status", "failed"),
+            "status": status,
             "progress": data.get("progress", 0),
             "error": data.get("error"),
             "message": data.get("message", ""),
@@ -160,10 +173,6 @@ def _load_jobs_from_disk() -> None:
             "sheet_size": data.get("sheet_size"),
             "frame_size": data.get("frame_size"),
         }
-        if job["status"] in ("queued", "processing"):
-            job["status"] = "failed"
-            job["error"] = "服务重启中断（任务未完成）"
-            job["message"] = "生成失败"
         _jobs[job_id] = job
 
 
@@ -248,7 +257,14 @@ def _run_job(job_id: str) -> None:
     except Exception as exc:  # surfaced in the UI, not just the console
         _set(job_id, status="failed", message="生成失败",
              error=str(exc)[:2000])
-        _write_job_json(job_id)
+        # Failed jobs keep nothing on disk: delete the whole folder
+        # (uploaded input, partial frames, job.json). The in-memory
+        # record is kept only so the current page's poll can still
+        # show the failure reason; list_jobs() below filters failed
+        # jobs out of history, and after a restart the record is
+        # gone entirely. Retry still works because the browser still
+        # holds the selected video file.
+        shutil.rmtree(_job_dir(job_id), ignore_errors=True)
 
 
 def _safe_frame_path(job_id: str, name: str) -> Path:
@@ -328,16 +344,23 @@ async def create_job(
         shutil.rmtree(job_dir, ignore_errors=True)
         raise HTTPException(status_code=400, detail="上传的文件为空")
 
-    smoothing = temporal_smoothing.strip().lower() in ("true", "1", "on", "yes")
-    despill_on = despill.strip().lower() in ("true", "1", "on", "yes")
-    if not 0 <= despill_strength <= 1 or despill_edge_width < 0:
-        raise HTTPException(status_code=400, detail="去溢色参数不合法：强度须在 0-1 之间，边缘宽度 >= 0")
-    despill_color_value = despill_color.strip().lower()
-    despill_custom_value = despill_custom_color.strip()
+    # Validation after the upload: if it fails, the uploaded folder
+    # would otherwise be orphaned on disk with no job record, so
+    # clean it up like any other failed job.
     try:
-        resolve_color(despill_custom_value if despill_color_value == "custom" else despill_color_value)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        smoothing = temporal_smoothing.strip().lower() in ("true", "1", "on", "yes")
+        despill_on = despill.strip().lower() in ("true", "1", "on", "yes")
+        if not 0 <= despill_strength <= 1 or despill_edge_width < 0:
+            raise HTTPException(status_code=400, detail="去溢色参数不合法：强度须在 0-1 之间，边缘宽度 >= 0")
+        despill_color_value = despill_color.strip().lower()
+        despill_custom_value = despill_custom_color.strip()
+        try:
+            resolve_color(despill_custom_value if despill_color_value == "custom" else despill_color_value)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+    except HTTPException:
+        shutil.rmtree(job_dir, ignore_errors=True)
+        raise
     params = {
         "fps": fps, "columns": columns, "spacing": spacing,
         "model": model.strip(), "max_size": max_size,
@@ -365,10 +388,16 @@ async def create_job(
 
 @app.get("/api/jobs")
 def list_jobs() -> dict:
-    """History, newest first. Loads jobs from disk on first call."""
+    """History, newest first. Loads jobs from disk on first call.
+
+    Failed jobs are excluded: their files are deleted on failure,
+    and only the in-memory record remains so the current page can
+    show the error. get_job() still returns a failed job for that
+    current poll; the history list never shows it.
+    """
     _load_jobs_from_disk()
     jobs = sorted(
-        _jobs.values(),
+        (j for j in _jobs.values() if j["status"] != "failed"),
         key=lambda j: j.get("created_at") or "",
         reverse=True,
     )

@@ -468,6 +468,8 @@
           '。常见原因：缺少 ffmpeg（请安装并加入 PATH）、模型首次下载失败（请检查网络后重试）。');
         // Terminal state: the start button must become usable again,
         // and retry offers one-click regeneration with the same file.
+        // loadHistory() here only refreshes other jobs: failed jobs
+        // are deleted on the server and filtered out of history.
         startBtn.disabled = false;
         showRetry(true);
         loadHistory();
