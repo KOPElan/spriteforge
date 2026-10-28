@@ -41,9 +41,24 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .history-toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
 .history-toolbar label.checkbox { display: flex; gap: 6px; align-items: center; font-size: 14px; }
 #history-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
-.history-card { background: #12161b; border: 1px solid #2d3540; border-radius: 10px; padding: 12px; display: grid; gap: 8px; }
-.history-card img { width: 100%; cursor: pointer; background: repeating-conic-gradient(#333 0 25%, #222 0 50%) 0 0 / 16px 16px; border: 1px solid #2d3540; }
-.history-card a { color: #6ea8fe; }
+.history-card { background: #12161b; border: 1px solid #2d3540; border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+/* Unify the three things that used to vary per card:
+   - checkbox: the global input padding/border used to inflate it
+     and grid stretch moved it around; now a fixed 20px box, top-left.
+   - thumbnail: sheets have different aspects (18 frames = 3 rows,
+     37 frames = 7 rows), so height:auto gave different heights;
+     now every thumbnail is the same 240px box, with the sheet
+     contained inside (aspect kept, never stretched or cropped).
+   - actions: preview/delete were <button>s but download-ZIP was a
+     plain text <a>; now all three are the same 42px full-width
+     button. The title paragraph grows to fill, so the buttons sit
+     at the bottom of the card. */
+.history-card input.history-select { width: 20px; height: 20px; min-width: 20px; padding: 0; margin: 0; align-self: flex-start; accent-color: #2f6fed; cursor: pointer; }
+.history-card img { width: 100%; height: 240px; object-fit: contain; cursor: pointer; background: repeating-conic-gradient(#333 0 25%, #222 0 50%) 0 0 / 16px 16px; border: 1px solid #2d3540; box-sizing: border-box; }
+.history-card img + p { flex: 1; margin: 0; }
+.history-card button, .history-card a { display: flex; align-items: center; justify-content: center; width: 100%; height: 42px; min-height: 42px; padding: 0 10px; font-size: 15px; box-sizing: border-box; }
+.history-card a { background: #2f6fed; border: 1px solid #2f6fed; color: #fff; text-decoration: none; }
+.history-toolbar input[type="checkbox"] { width: 18px; height: 18px; padding: 0; margin: 0; }
 #preview-modal { position: fixed; inset: 0; z-index: 100; }
 #preview-modal .modal-backdrop { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.7); }
 #preview-modal .modal-content { position: relative; max-width: 900px; margin: 40px auto; max-height: calc(100vh - 80px); overflow: auto; background: #1c2128; border: 1px solid #2d3540; border-radius: 12px; padding: 18px; }
