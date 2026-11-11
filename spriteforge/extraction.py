@@ -121,3 +121,84 @@ def extract_frames(
     if not files:
         raise RuntimeError(f"No frames extracted from {video_path}")
     return [(path, round(i / fps, 3)) for i, path in enumerate(files)]
+
+
+def read_gif_durations(gif_path: Path) -> list[float]:
+    """Per-frame durations of a GIF in seconds, via Pillow.
+
+    Falls back to 0.1 s per frame when a frame has no duration stored.
+    Raises if the file is not a readable GIF.
+    """
+    from PIL import Image
+
+    durations: list[float] = []
+    with Image.open(gif_path) as im:
+        n = getattr(im, "n_frames", 1)
+        for i in range(n):
+            im.seek(i)
+            ms = im.info.get("duration", 100)
+            try:
+                ms = int(ms)
+            except (TypeError, ValueError):
+                ms = 100
+            durations.append(max(ms, 1) / 1000.0)
+    if not durations:
+        raise RuntimeError(f"No frames found in GIF {gif_path}")
+    return durations
+
+
+def extract_gif_frames(
+    gif_path: Path, frames_dir: Path
+) -> list[tuple[Path, float]]:
+    """Extract every frame of a GIF, exactly once, with real timestamps.
+
+    Unlike :func:`extract_frames` this does NOT resample to a uniform
+    fps: ``-vsync 0`` keeps one PNG per GIF frame (ffmpeg composites
+    delta frames correctly, which a naive Pillow seek would not), and
+    timestamps come from the GIF's own per-frame durations, so a
+    variable-delay GIF keeps its rhythm instead of being flattened
+    to a fixed rate. Returns [(path, timestamp_seconds)].
+    """
+    frames_dir.mkdir(parents=True, exist_ok=True)
+    pattern = str(frames_dir / "frame_%05d.png")
+    _run(
+        [
+            "ffmpeg", "-y",
+            "-i", str(gif_path),
+            "-vsync", "0",
+            pattern,
+        ]
+    )
+    files = sorted(frames_dir.glob("frame_*.png"))
+    if not files:
+        raise RuntimeError(f"No frames extracted from {gif_path}")
+    try:
+        durations = read_gif_durations(gif_path)
+    except Exception:
+        durations = []
+    timestamps: list[float] = []
+    t = 0.0
+    for i in range(len(files)):
+        timestamps.append(round(t, 3))
+        # Durations unreadable (or shorter than the frame list):
+        # fall back to 0.1 s per frame, the GIF default.
+        t += durations[i] if i < len(durations) else 0.1
+    return list(zip(files, timestamps))
+
+
+def frames_have_transparency(frame_paths: list[Path]) -> bool:
+    """True if any extracted frame has a pixel with alpha < 255.
+
+    Checked on ffmpeg-composited PNGs, not on raw GIF frames: an
+    optimised GIF stores later frames as small deltas whose raw
+    pixels are transparent outside the delta region, so checking the
+    raw frames would false-positive on opaque GIFs.
+    """
+    from PIL import Image
+
+    for path in frame_paths:
+        with Image.open(path) as im:
+            alpha = im.convert("RGBA").split()[-1]
+            if alpha.getextrema()[0] < 255:
+                return True
+    return False

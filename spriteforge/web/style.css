@@ -11,6 +11,7 @@ main { max-width: 960px; margin: 0 auto; padding: 12px 20px 40px; display: grid;
 #dropzone { border: 2px dashed #3d4654; border-radius: 10px; padding: 28px 16px; text-align: center; cursor: pointer; }
 #dropzone.drag { border-color: #6ea8fe; background: #22303f; }
 #source-preview { width: 100%; max-height: 360px; margin-top: 12px; background: #000; }
+#source-preview-img { width: 100%; max-height: 360px; margin-top: 12px; object-fit: contain; background: #000; }
 form { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
 form label { display: grid; gap: 6px; font-size: 14px; }
 form label.checkbox { grid-template-columns: auto 1fr; align-items: center; }

@@ -1,7 +1,8 @@
 # spriteforge（游戏序列帧工具，v1）
 
-把一段短视频变成游戏可用的序列帧：抽帧 → AI 抠图 → 轻度时序平滑 →
+把一段短视频（或 GIF）变成游戏可用的序列帧：抽帧 → AI 抠图 → 轻度时序平滑 →
 按透明区域裁剪 → 合成 Sprite Sheet，并输出 Unity 友好的索引 JSON。
+透明底 GIF 不走抠图，直接拆帧合图；绿幕 / 纯色背景的 GIF 按视频走抠图流程。
 
 ## Web 界面（推荐，跨平台、一键部署）
 
@@ -56,7 +57,7 @@ GPU 版见上面一节。
 
 ### Web 界面功能
 
-- 导入：拖放或文件选择上传视频，上传后可直接预览原视频；单个文件上限 200MB
+- 导入：拖放或文件选择上传视频或 GIF，上传后可直接预览原视频（GIF 用图片预览，会动）；单个文件上限 200MB。透明底 GIF 直接拆帧合图，不抠图、不下载模型，帧率按 GIF 本身的平均帧率算（界面里的 fps 对它不起作用，每帧的原始延时保留在 index.json 的 t 里）；绿幕 / 纯色背景的 GIF 按视频走抠图流程，fps 按界面里的算。透明与否按 ffmpeg 合成后的单帧实际透明像素判断，不是只看文件头，所以优化过的 GIF 也不会误判
 - 参数：fps（默认 12）、列数（默认 6）、间距（默认 4）、模型（默认 birefnet-general）、
   输入上限（默认 720px）、单帧目标尺寸（可选）、时序平滑开关（默认开）、
   边缘去溢色开关（默认开，强度默认 1.0，幕布颜色可选绿/蓝/红/青/品红/黄或自定义）；提交过的参数会自动记住
@@ -87,7 +88,7 @@ GPU 版见上面一节。
 |---|---|---|
 | GET | `/` | Web 界面 |
 | GET | `/api/health` | 健康检查 |
-| POST | `/api/jobs` | multipart 上传视频 + 表单参数（fps、columns、spacing、model、max_size、target_size、temporal_smoothing、despill、despill_strength、despill_edge_width），返回 `{"id": ...}`（202） |
+| POST | `/api/jobs` | multipart 上传视频或 GIF + 表单参数（fps、columns、spacing、model、max_size、target_size、temporal_smoothing、despill、despill_strength、despill_edge_width），返回 `{"id": ...}`（202）。透明 GIF 的任务参数里会多一个 `gif_transparent: true`，且 `fps` 会被改写成 GIF 本身的平均帧率 |
 | GET | `/api/jobs/{id}` | 任务状态、进度、错误、帧列表 |
 | GET | `/api/jobs/{id}/sprite.png` | 合图下载 |
 | GET | `/api/jobs/{id}/index.json` | Unity 索引下载 |
@@ -101,7 +102,7 @@ GPU 版见上面一节。
 
 ## 功能
 
-- 输入短视频（典型：1–3 秒，720×720 及以下分辨率）
+- 输入短视频或 GIF（典型：1–3 秒，720×720 及以下分辨率）
 - 输入上限 **720px**：已在上限内的原样使用、不放大；超过上限的按比例缩小到上限内，不压扁、不裁剪
 - 默认 **12 fps** 抽帧（可用 `--fps` 修改）
 - 用 **BiRefNet-general**（rembg）抠图，保留**软 alpha**，不做二值硬切

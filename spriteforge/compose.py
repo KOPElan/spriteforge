@@ -145,8 +145,15 @@ def compose_sheet(
     index_path: Path,
     columns: int = 6,
     spacing: int = 4,
+    fps: float | None = None,
 ) -> dict:
-    """Compose the sheet PNG and index.json; return the index dict."""
+    """Compose the sheet PNG and index.json; return the index dict.
+
+    ``fps`` overrides the index fps when given (e.g. a transparent
+    GIF's average fps, which a variable-delay GIF's first interval
+    alone would misrepresent). When None, fps is derived from the
+    first timestamp interval, as before.
+    """
     if not frames:
         raise ValueError("No frames to compose")
     if columns < 1:
@@ -184,11 +191,14 @@ def compose_sheet(
 
     sheet_path.parent.mkdir(parents=True, exist_ok=True)
     sheet.save(sheet_path, "PNG")
-    fps = 0.0
-    if len(timestamps) > 1 and timestamps[1] > timestamps[0]:
-        # Timestamps are rounded to ms, so snap near-integer fps values.
-        raw_fps = 1.0 / (timestamps[1] - timestamps[0])
-        fps = int(round(raw_fps)) if abs(raw_fps - round(raw_fps)) < 0.1 else round(raw_fps, 2)
+    if fps is None:
+        fps = 0.0
+        if len(timestamps) > 1 and timestamps[1] > timestamps[0]:
+            # Timestamps are rounded to ms, so snap near-integer fps values.
+            raw_fps = 1.0 / (timestamps[1] - timestamps[0])
+            fps = int(round(raw_fps)) if abs(raw_fps - round(raw_fps)) < 0.1 else round(raw_fps, 2)
+    else:
+        fps = int(round(fps)) if abs(fps - round(fps)) < 0.1 else round(fps, 2)
     index = {
         "tool": "spriteforge",
         "version": "1.0",

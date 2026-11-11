@@ -23,11 +23,12 @@
     <h2>1. 导入视频</h2>
     <div id="dropzone" tabindex="0" role="button" aria-label="选择或拖入视频文件">
       <p>把视频拖到这里，或 <button type="button" id="pick-btn">选择文件</button></p>
-      <p class="hint">支持 mp4 / mov / webm / avi / mkv，单个文件上限 200MB；典型输入 1–3 秒、720×720 及以下。</p>
-      <input type="file" id="file-input" accept="video/mp4,video/quicktime,video/webm,video/x-msvideo,video/x-matroska,.mp4,.mov,.webm,.avi,.mkv" hidden>
+      <p class="hint">支持 mp4 / mov / webm / avi / mkv / gif，单个文件上限 200MB；典型输入 1–3 秒、720×720 及以下。</p>
+      <input type="file" id="file-input" accept="video/mp4,video/quicktime,video/webm,video/x-msvideo,video/x-matroska,image/gif,.mp4,.mov,.webm,.avi,.mkv,.gif" hidden>
     </div>
     <p id="file-info" class="hint"></p>
     <video id="source-preview" controls muted playsinline hidden></video>
+    <img id="source-preview-img" alt="GIF 预览" hidden>
   </section>
 
   <section class="card">
@@ -68,6 +69,7 @@
         <p class="hint">自定义颜色需为饱和色（比如某种绿色、蓝色），白/灰/黑色幕布没有颜色溢色可去，去溢色对它不起作用。幕布颜色要和角色主色错开，否则细小的同色元素也可能被洗掉。</p>
       </fieldset>
       <p class="hint">首次运行需联网下载模型（BiRefNet-general 约 1GB），下载期间进度会停在 20–30% 一段时间，属于正常现象，之后可离线使用。</p>
+      <p class="hint">GIF 说明：透明底 GIF 直接拆帧合图，不抠图、不下载模型，帧率按 GIF 本身的平均帧率算（界面里的 fps 对它不起作用，每帧的原始延时保留在 index.json 的 t 里）；绿幕 / 纯色背景的 GIF 则按视频走抠图流程，fps 按界面里的算。</p>
       <p class="hint">参数会自动记住上次提交的值（存在浏览器本地），下次打开页面直接沿用；换浏览器或设备时，第一次会先用最近一次历史任务的参数。</p>
       <button type="submit" id="start-btn" disabled>开始生成</button>
       <button type="button" id="reset-params-btn">恢复默认参数</button>

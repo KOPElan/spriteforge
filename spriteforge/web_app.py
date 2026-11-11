@@ -42,19 +42,27 @@ from pathlib import Path
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from PIL import Image
 
 from .cli import parse_target_size
 from .compose import compose_sheet, standardize_frames
 from .despill import despill_edge_frames, resolve_color
 from .loop import suggest_loops
-from .extraction import check_ffmpeg, extract_frames, normalize_to_max_size
+from .extraction import (
+    check_ffmpeg,
+    extract_frames,
+    extract_gif_frames,
+    frames_have_transparency,
+    normalize_to_max_size,
+    read_gif_durations,
+)
 from .matting import DEFAULT_MODEL, get_session, matte_image
 from .smoothing import smooth_alpha
 
 WEB_DIR = Path(__file__).resolve().parent / "web"
 JOBS_DIR = Path(os.environ.get("SPRITEFORGE_JOBS_DIR", "./jobs"))
 MAX_UPLOAD_BYTES = 200 * 1024 * 1024  # 200 MB, same cap as the CLI docs
-ALLOWED_EXTENSIONS = {".mp4", ".mov", ".webm", ".avi", ".mkv"}
+ALLOWED_EXTENSIONS = {".mp4", ".mov", ".webm", ".avi", ".mkv", ".gif"}
 
 app = FastAPI(title="spriteforge", version="0.1.0")
 _jobs: dict[str, dict] = {}
@@ -194,47 +202,114 @@ def _run_job(job_id: str) -> None:
              message="准备中：抽帧")
         check_ffmpeg()
         target_size = parse_target_size(params.get("target_size") or None)
-        input_path = job_dir / "input.mp4"
+        input_path = job_dir / params.get("input_file", "input.mp4")
+        is_gif = input_path.suffix.lower() == ".gif"
+        transparent_gif = False
+        effective_fps: float | None = None
         with tempfile.TemporaryDirectory(prefix="spriteforge_web_") as tmp:
             tmp_path = Path(tmp)
-            normalized = normalize_to_max_size(
-                input_path, tmp_path / "normalized.mp4",
-                max_size=params["max_size"],
-            )
-            extracted = extract_frames(
-                normalized, tmp_path / "extracted", fps=params["fps"]
-            )
-            if not extracted:
-                raise RuntimeError("没有从视频中提取到任何帧")
-            # Model load is the point where a first-time user can see
-            # progress sit at 20% for a long time: get_session()
-            # downloads the model (~1 GB for BiRefNet-general) on
-            # first use and reports no download progress. The step
-            # line stays short; the full explanation lives in the
-            # params hint, and the frontend elapsed timer keeps
-            # ticking so the card never looks dead.
-            _set(job_id, progress=20,
-                 message="加载抠图模型（首次需下载，稍候）")
-            session = get_session(params["model"])
-            total = len(extracted)
-            matted = []
-            for i, (path, _ts) in enumerate(extracted):
-                matted.append(matte_image(path, session))
-                _set(job_id, progress=20 + int(60 * (i + 1) / total),
-                     message=f"抠图中：第 {i + 1} / {total} 帧")
-            _set(job_id, message="去溢色、平滑、裁剪")
-            if params.get("despill", True):
-                despill_color = params.get("despill_color", "green")
-                if params.get("despill_color") == "custom":
-                    despill_color = params.get("despill_custom_color", "#00ff00")
-                matted = despill_edge_frames(
-                    matted, strength=params.get("despill_strength", 1.0),
-                    edge_width=params.get("despill_edge_width", 3),
-                    color=despill_color,
+            if is_gif:
+                # GIF has two very different shapes, decided by the
+                # composited frames, not by the file header: a
+                # transparent GIF goes straight to the sheet (no
+                # model, no despill, no smoothing -- its alpha is
+                # already the answer), while an opaque GIF (e.g.
+                # green-screen) falls through to the normal video
+                # matting path below. Transparency is checked on
+                # ffmpeg-composited PNGs: raw GIF frames are often
+                # small deltas, transparent outside the delta even
+                # when the composited frame is fully opaque.
+                _set(job_id, progress=5, message="检查 GIF：抽帧并判断透明通道")
+                gif_extracted = extract_gif_frames(input_path, tmp_path / "gif_frames")
+                if not gif_extracted:
+                    raise RuntimeError("没有从 GIF 中提取到任何帧")
+                if frames_have_transparency([p for p, _ in gif_extracted]):
+                    transparent_gif = True
+                    timestamps = [t for _, t in gif_extracted]
+                    try:
+                        durations = read_gif_durations(input_path)
+                        total_s = sum(durations)
+                        effective_fps = (
+                            len(durations) / total_s if total_s > 0 else None
+                        )
+                    except Exception:
+                        effective_fps = None
+                    if not effective_fps:
+                        effective_fps = params["fps"]
+                    # Snap near-integer rates (6 frames / 0.6 s floats
+                    # to 9.999...): the index does the same snap, and
+                    # params fps should agree with it.
+                    if abs(effective_fps - round(effective_fps)) < 0.1:
+                        effective_fps = int(round(effective_fps))
+                    else:
+                        effective_fps = round(effective_fps, 2)
+                    # The job's fps becomes the GIF's own average fps:
+                    # the UI fps is ignored for transparent GIFs (the
+                    # GIF already has one frame per original frame),
+                    # and the frontend plays the preview at params fps.
+                    params["fps"] = effective_fps
+                    matted = []
+                    for path, _ts in gif_extracted:
+                        with Image.open(path) as im:
+                            rgba = im.convert("RGBA")
+                            rgba.load()
+                            matted.append(rgba)
+                    # GIFs over max_size are scaled down here with
+                    # Pillow (never via the mp4 normaliser, which
+                    # would drop the alpha channel entirely).
+                    max_side = max(max(im.width, im.height) for im in matted)
+                    if max_side > params["max_size"]:
+                        scaled = []
+                        for im in matted:
+                            fitted = im.copy()
+                            fitted.thumbnail(
+                                (params["max_size"], params["max_size"]),
+                                Image.Resampling.LANCZOS,
+                            )
+                            scaled.append(fitted)
+                        matted = scaled
+                    _set(job_id, progress=20,
+                         message="透明 GIF：直接合图（不抠图）")
+            if not transparent_gif:
+                normalized = normalize_to_max_size(
+                    input_path, tmp_path / "normalized.mp4",
+                    max_size=params["max_size"],
                 )
-            if params["temporal_smoothing"]:
-                matted = smooth_alpha(matted)
-            timestamps = [t for _, t in extracted]
+                extracted = extract_frames(
+                    normalized, tmp_path / "extracted", fps=params["fps"]
+                )
+                if not extracted:
+                    raise RuntimeError("没有从视频中提取到任何帧")
+                # Model load is the point where a first-time user can see
+                # progress sit at 20% for a long time: get_session()
+                # downloads the model (~1 GB for BiRefNet-general) on
+                # first use and reports no download progress. The step
+                # line stays short; the full explanation lives in the
+                # params hint, and the frontend elapsed timer keeps
+                # ticking so the card never looks dead.
+                _set(job_id, progress=20,
+                     message="加载抠图模型（首次需下载，稍候）")
+                session = get_session(params["model"])
+                total = len(extracted)
+                matted = []
+                for i, (path, _ts) in enumerate(extracted):
+                    matted.append(matte_image(path, session))
+                    _set(job_id, progress=20 + int(60 * (i + 1) / total),
+                         message=f"抠图中：第 {i + 1} / {total} 帧")
+                _set(job_id, message="去溢色、平滑、裁剪")
+                if params.get("despill", True):
+                    despill_color = params.get("despill_color", "green")
+                    if params.get("despill_color") == "custom":
+                        despill_color = params.get("despill_custom_color", "#00ff00")
+                    matted = despill_edge_frames(
+                        matted, strength=params.get("despill_strength", 1.0),
+                        edge_width=params.get("despill_edge_width", 3),
+                        color=despill_color,
+                    )
+                if params["temporal_smoothing"]:
+                    matted = smooth_alpha(matted)
+                timestamps = [t for _, t in extracted]
+            params["gif_transparent"] = transparent_gif
             frames, (frame_w, frame_h) = standardize_frames(matted, target_size)
             frames_out.mkdir(parents=True, exist_ok=True)
             names = []
@@ -248,9 +323,11 @@ def _run_job(job_id: str) -> None:
                 sheet_path=out_dir / "sprite.png",
                 index_path=out_dir / "index.json",
                 columns=params["columns"], spacing=params["spacing"],
+                fps=effective_fps,
             )
         _set(
-            job_id, status="completed", progress=100, message="完成",
+            job_id, status="completed", progress=100,
+            message="完成（透明 GIF，直接合图，未抠图）" if transparent_gif else "完成",
             frames=names, sheet_size=index["sheet_size"],
             frame_size=index["frame_size"],
         )
@@ -328,9 +405,11 @@ async def create_job(
     job_dir = _job_dir(job_id)
     job_dir.mkdir(parents=True, exist_ok=True)
     # Stream to disk with a hard size cap, instead of reading the
-    # whole upload into memory.
+    # whole upload into memory. Keep the original suffix: a GIF saved
+    # as input.mp4 would still decode (ffmpeg probes content), but
+    # the worker branches on the suffix to pick the GIF path.
     written = 0
-    dest = job_dir / "input.mp4"
+    dest = job_dir / f"input{ext}"
     try:
         with open(dest, "wb") as out:
             while True:
@@ -376,6 +455,8 @@ async def create_job(
         "despill_color": despill_color_value,
         "despill_custom_color": despill_custom_value,
         "filename": file.filename,
+        "input_file": f"input{ext}",
+        "gif_transparent": False,
     }
     with _jobs_lock:
         _jobs[job_id] = {

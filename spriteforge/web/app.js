@@ -8,6 +8,7 @@
   var pickBtn = document.getElementById('pick-btn');
   var fileInfo = document.getElementById('file-info');
   var sourcePreview = document.getElementById('source-preview');
+  var sourcePreviewImg = document.getElementById('source-preview-img');
   var startBtn = document.getElementById('start-btn');
   var retryBtn = document.getElementById('retry-btn');
   var retryHint = document.getElementById('retry-hint');
@@ -425,9 +426,22 @@
     if (!file) return;
     selectedFile = file;
     fileInfo.textContent = '已选择：' + file.name + '（' + (file.size / 1048576).toFixed(1) + ' MB）';
+    // A GIF cannot preview in the <video> element, so show it as an
+    // <img> (which animates natively) instead.
+    var isGif = /\.gif$/i.test(file.name) || file.type === 'image/gif';
     if (sourcePreview.src) URL.revokeObjectURL(sourcePreview.src);
-    sourcePreview.src = URL.createObjectURL(file);
-    sourcePreview.hidden = false;
+    if (sourcePreviewImg.src) URL.revokeObjectURL(sourcePreviewImg.src);
+    if (isGif) {
+      sourcePreview.hidden = true;
+      sourcePreview.removeAttribute('src');
+      sourcePreviewImg.src = URL.createObjectURL(file);
+      sourcePreviewImg.hidden = false;
+    } else {
+      sourcePreviewImg.hidden = true;
+      sourcePreviewImg.removeAttribute('src');
+      sourcePreview.src = URL.createObjectURL(file);
+      sourcePreview.hidden = false;
+    }
     startBtn.disabled = false;
   }
 
